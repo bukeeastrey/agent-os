@@ -326,18 +326,18 @@ class TelegramChannel:
     @property
     def capability_profile(self) -> ChannelCapabilityProfile:
         return ChannelCapabilityProfile(
-            channel_type="telegram",
-            group_chat=True,
-            mentions=True,
-            typing_indicator=True,
-            native_file_upload=True,
-            media=True,
-            reply=True,
-            thread_reply=True,
-            edit=True,
-            delete=True,
-            transports=(self.config.transport_name,),
-        )
+        channel_type="telegram",
+        group_chat=True,
+        mentions=True,
+        typing_indicator=True,
+        native_file_upload=True,
+        media=True,
+        reply=True,
+        thread_reply=True,
+        edit=True,
+        delete=True,
+        transports=(self.config.transport_name, "streaming"),
+    )
 
     @property
     def platform_capability_manifest(self) -> ChannelPlatformManifest:

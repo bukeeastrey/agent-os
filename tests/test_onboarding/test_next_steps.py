@@ -57,7 +57,7 @@ def test_onboarding_finish_output_summarizes_all_capability_sections():
 
     assert (
         "  Capabilities: Web search=Ready | Channels=Later | "
-        "Image generation=Needs action | Voice audio=Later | "
+        "Image generation=Ready | Voice audio=Later | "
         "Memory embedding=Needs action"
     ) in text
     assert text.index("  Capabilities:") < text.index("Commands:")

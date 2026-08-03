@@ -283,7 +283,6 @@ def test_channel_stream_policy_prefers_adapter_stream_updates() -> None:
     assert policy.relay_stream is True
     assert policy.typing_keepalive is False
 
-
 # ── Channel /new "fresh session" pointer (New Chat parity) ────────────────
 
 
