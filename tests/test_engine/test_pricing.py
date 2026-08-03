@@ -3,16 +3,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agentos.gateway.config import (
-    _bankr_tiers,
-    _opencap_tiers,
-    _openrouter_tiers,
-)
-from agentos.engine.pricing import _PRICING_TABLE
-from agentos.provider.model_catalog import _STATIC_FALLBACK
-
 from agentos.engine import pricing
 from agentos.engine.pricing import (
+    _PRICING_TABLE,
     PriceEntry,
     PricingCache,
     _parse_opencap_prices,
@@ -22,6 +15,12 @@ from agentos.engine.pricing import (
     seed_live_price_cache_for_tests,
     seed_opencap_price_cache,
 )
+from agentos.gateway.config import (
+    _bankr_tiers,
+    _opencap_tiers,
+    _openrouter_tiers,
+)
+from agentos.provider.model_catalog import _STATIC_FALLBACK
 
 
 @pytest.fixture(autouse=True)
@@ -407,8 +406,8 @@ def test_tier_defaults_have_explicit_price_and_catalog_entries() -> None:
     )
 
 def test_tier_defaults_have_explicit_price_and_catalog_entries():
-    from agentos.gateway.config import _bankr_tiers
     from agentos.engine.pricing import _PRICING_TABLE
+    from agentos.gateway.config import _bankr_tiers
     from agentos.provider.model_catalog import _STATIC_FALLBACK
 
     tier_models = {
