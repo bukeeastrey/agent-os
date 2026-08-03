@@ -3,6 +3,14 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from agentos.gateway.config import (
+    _bankr_tiers,
+    _opencap_tiers,
+    _openrouter_tiers,
+)
+from agentos.engine.pricing import _PRICING_TABLE
+from agentos.provider.model_catalog import _STATIC_FALLBACK
+
 from agentos.engine import pricing
 from agentos.engine.pricing import (
     PriceEntry,
@@ -372,3 +380,45 @@ def test_direct_openai_zhipu_kimi_and_minimax_prices_do_not_fall_back_to_default
 
     assert price.input_per_m == pytest.approx(input_per_m)
     assert price.output_per_m == pytest.approx(output_per_m)
+
+def test_tier_defaults_have_explicit_price_and_catalog_entries() -> None:
+    pricing_ids = {prefix.lower() for prefix, _ in _PRICING_TABLE}
+    catalog_ids = {model_id.lower() for model_id in _STATIC_FALLBACK}
+
+    tier_models = set()
+
+    for tier_set in (
+        _bankr_tiers(),
+        _opencap_tiers(),
+        _openrouter_tiers(),
+    ):
+        for config in tier_set.values():
+            tier_models.add(config["model"].lower())
+
+    missing_pricing = tier_models - pricing_ids
+    missing_catalog = tier_models - catalog_ids
+
+    assert not missing_pricing, (
+        f"Missing pricing entries: {sorted(missing_pricing)}"
+    )
+
+    assert not missing_catalog, (
+        f"Missing catalog entries: {sorted(missing_catalog)}"
+    )
+
+def test_tier_defaults_have_explicit_price_and_catalog_entries():
+    from agentos.gateway.config import _bankr_tiers
+    from agentos.engine.pricing import _PRICING_TABLE
+    from agentos.provider.model_catalog import _STATIC_FALLBACK
+
+    tier_models = {
+        cfg["model"]
+        for name, cfg in _bankr_tiers().items()
+        if name != "image_model"
+    }
+
+    pricing_models = {model for model, _ in _PRICING_TABLE}
+
+    for model in tier_models:
+        assert model in pricing_models, model
+        assert model in _STATIC_FALLBACK, model
