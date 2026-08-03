@@ -36,6 +36,7 @@ from agentos.channels.contract import (
 from agentos.channels.types import Attachment, ChannelHealth, IncomingMessage, OutgoingMessage
 from agentos.engine.native_commands import telegram_bot_commands
 from agentos.env import trust_env as _trust_env
+from agentos.channels._util import StreamThrottle
 
 log = structlog.get_logger(__name__)
 
@@ -889,40 +890,48 @@ class TelegramChannel:
         """
 
         target = channel_id or self.config.default_chat_id
+        throttle = StreamThrottle(interval_s=1.0)
+        message_ref: str | None = None
         if not target:
             return ChannelSendResult.unsupported(
                 capability=ChannelCapabilities.STREAMING,
                 reason="no chat target",
             )
 
-        text = ""
-        message_ref: str | None = None
+        async def _post(text: str) -> None:
+            nonlocal message_ref
+
+            result = await self.send(
+                OutgoingMessage(
+                    content=text,
+                    metadata={
+                        "chat_id": target,
+                        "thread_id": thread_id,
+                    },
+                )
+            )
+
+            msg = result.get("result", result)
+
+            message_id = msg.get("message_id")
+            if message_id is None:
+                raise RuntimeError("telegram send_streaming missing message_id")
+
+            message_ref = f"{target}|{message_id}"
+
+
+        async def _edit(text: str) -> None:
+            if message_ref is None:
+                return
+
+            await self.edit(message_ref, text)
+
 
         async for chunk in chunks:
-            if not chunk:
-                continue
+            throttle.add(chunk)
+            await throttle.maybe_flush(post=_post, edit=_edit)
 
-            text += chunk
-
-            if message_ref is None:
-                result = await self.send(
-                    OutgoingMessage(
-                        content=text,
-                        metadata={
-                            "chat_id": target,
-                            "thread_id": thread_id,
-                        },
-                    )
-                )
-
-                msg = result.get("result", result)
-                message_id = msg.get("message_id")
-                if message_id is None:
-                    raise RuntimeError("telegram send_streaming missing message_id")
-
-                message_ref = f"{target}|{message_id}"
-            else:
-                await self.edit(message_ref, text)
+        await throttle.force_flush(post=_post, edit=_edit)
 
         if message_ref is None:
             return ChannelSendResult.unsupported(
