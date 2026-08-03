@@ -135,7 +135,7 @@ async def test_telegram_keepalive_uses_inbound_chat_topic_and_adapter_cadence(
     assert sleep_intervals == []
     assert sleep_started.is_set() is False
 
-
+from collections.abc import AsyncIterator
 @pytest.mark.asyncio
 async def test_telegram_keepalive_treats_api_failure_as_best_effort(
     monkeypatch: pytest.MonkeyPatch,
@@ -162,3 +162,60 @@ async def test_telegram_keepalive_treats_api_failure_as_best_effort(
     assert attempts == 0
     assert sleep_intervals == []
     assert sleep_started.is_set() is False
+
+@pytest.mark.asyncio
+async def test_send_streaming_posts_then_edits() -> None:
+    calls: list[tuple[str, dict]] = []
+
+    async def fake_api(method: str, payload: dict) -> dict:
+        calls.append((method, payload))
+
+        if method == "sendMessage":
+            return {"message_id": 42}
+
+        return {"ok": True}
+
+    channel = TelegramChannel(
+        TelegramChannelConfig(
+            token="test-token",
+            default_chat_id="-100111",
+        )
+    )
+
+    channel._api = fake_api  # type: ignore[method-assign]
+
+    async def chunks() -> AsyncIterator[str]:
+        yield "Hello "
+        yield "world"
+
+    result = await channel.send_streaming(
+        chunks(),
+        channel_id="-100111",
+        thread_id="5",
+    )
+
+    assert result.provider_message_id == "-100111|42"
+
+    assert calls[0][0] == "sendMessage"
+    assert calls[0][1]["chat_id"] == "-100111"
+    assert calls[0][1]["message_thread_id"] == 5
+
+    assert calls[-1][0] == "editMessageText"
+    assert calls[-1][1]["chat_id"] == "-100111"
+    assert calls[-1][1]["message_id"] == 42
+
+def test_telegram_streaming_reply_kwargs_preserve_thread() -> None:
+    inbound = IncomingMessage(
+        content="hello",
+        channel_id="-100777",
+        metadata={"thread_id": "5"},
+    )
+
+    channel = TelegramChannel(
+        TelegramChannelConfig(token="test-token")
+    )
+
+    assert channel.streaming_reply_kwargs(inbound) == {
+        "channel_id": "-100777",
+        "thread_id": "5",
+    }
