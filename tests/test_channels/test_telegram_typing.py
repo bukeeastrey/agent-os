@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from types import SimpleNamespace
 from typing import Any
 
@@ -12,7 +13,6 @@ from agentos.channels.telegram import TelegramApiError, TelegramChannel, Telegra
 from agentos.channels.types import IncomingMessage
 from agentos.gateway import channel_dispatch
 
-import contextlib
 
 def _install_blocking_keepalive_sleep(
     monkeypatch: pytest.MonkeyPatch,
