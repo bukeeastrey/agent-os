@@ -119,6 +119,7 @@ class TelegramChannel:
     pairing_store: ChannelPairingStore = field(default_factory=ChannelPairingStore)
 
     supports_slash_commands: bool = True
+    supports_streaming: bool = True
     typing_keepalive_interval_s: ClassVar[float] = 4.0
     policy: ChannelAccessPolicy = field(
         default_factory=lambda: ChannelAccessPolicy(
@@ -863,6 +864,56 @@ class TelegramChannel:
             payload.pop("parse_mode", None)
             result = await self._api("sendMessage", payload)
         return result if isinstance(result, dict) else {"result": result}
+
+    async def send_streaming(
+        self,
+        chunks,
+        *,
+        channel_id: str | None = None,
+        thread_id: str | None = None,
+        **_: object,
+    ) -> ChannelSendResult:
+        """
+        Stream partial responses by repeatedly editing a Telegram message.
+        """
+
+        target = channel_id or self.config.default_chat_id
+        if not target:
+            return ChannelSendResult.unsupported(
+                capability=ChannelCapabilities.STREAMING,
+                reason="no chat target",
+            )
+
+        text = ""
+        message_ref: str | None = None
+
+        async for chunk in chunks:
+            if not chunk:
+                continue
+
+            text += chunk
+
+            if message_ref is None:
+                result = await self.send(
+                    OutgoingMessage(
+                        content=text,
+                        metadata={
+                            "chat_id": target,
+                            "thread_id": thread_id,
+                        },
+                    )
+                )
+
+                msg = result.get("result", result)
+                message_ref = f"{target}:{msg['message_id']}"
+            else:
+                await self.edit(message_ref, text)
+
+        return ChannelSendResult.sent(
+            capability=ChannelCapabilities.STREAMING,
+            target_id=str(target),
+            provider_message_id=message_ref or "",
+        )
 
     async def send_file(
         self,
