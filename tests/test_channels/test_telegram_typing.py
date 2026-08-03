@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from types import SimpleNamespace
 from typing import Any
 
@@ -135,7 +136,6 @@ async def test_telegram_keepalive_uses_inbound_chat_topic_and_adapter_cadence(
     assert sleep_intervals == []
     assert sleep_started.is_set() is False
 
-from collections.abc import AsyncIterator
 @pytest.mark.asyncio
 async def test_telegram_keepalive_treats_api_failure_as_best_effort(
     monkeypatch: pytest.MonkeyPatch,
@@ -200,12 +200,14 @@ async def test_send_streaming_posts_then_edits() -> None:
     assert calls[0][1]["chat_id"] == "-100111"
     assert calls[0][1]["message_thread_id"] == 5
 
-    assert calls[-1][0] == "editMessageText"
-    assert calls[-1][1]["chat_id"] == "-100111"
-    assert calls[-1][1]["message_id"] == 42
+    edit_call = next(call for call in calls if call[0] == "editMessageText")
+
+    assert edit_call[1]["chat_id"] == "-100111"
+    assert edit_call[1]["message_id"] == 42
 
 def test_telegram_streaming_reply_kwargs_preserve_thread() -> None:
     inbound = IncomingMessage(
+        sender_id="user-1",
         content="hello",
         channel_id="-100777",
         metadata={"thread_id": "5"},
