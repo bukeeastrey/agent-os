@@ -916,14 +916,24 @@ class TelegramChannel:
                 )
 
                 msg = result.get("result", result)
-                message_ref = f"{target}:{msg['message_id']}"
+                message_id = msg.get("message_id")
+                if message_id is None:
+                    raise RuntimeError("telegram send_streaming missing message_id")
+
+                message_ref = f"{target}|{message_id}"
             else:
                 await self.edit(message_ref, text)
+
+        if message_ref is None:
+            return ChannelSendResult.unsupported(
+                capability=ChannelCapabilities.STREAMING,
+                reason="empty stream",
+            )
 
         return ChannelSendResult.sent(
             capability=ChannelCapabilities.STREAMING,
             target_id=str(target),
-            provider_message_id=message_ref or "",
+            provider_message_id=message_ref,
         )
 
     async def send_file(
