@@ -404,20 +404,3 @@ def test_tier_defaults_have_explicit_price_and_catalog_entries() -> None:
     assert not missing_catalog, (
         f"Missing catalog entries: {sorted(missing_catalog)}"
     )
-
-def test_tier_defaults_have_explicit_price_and_catalog_entries():
-    from agentos.engine.pricing import _PRICING_TABLE
-    from agentos.gateway.config import _bankr_tiers
-    from agentos.provider.model_catalog import _STATIC_FALLBACK
-
-    tier_models = {
-        cfg["model"]
-        for name, cfg in _bankr_tiers().items()
-        if name != "image_model"
-    }
-
-    pricing_models = {model for model, _ in _PRICING_TABLE}
-
-    for model in tier_models:
-        assert model in pricing_models, model
-        assert model in _STATIC_FALLBACK, model
