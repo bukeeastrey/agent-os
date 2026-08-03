@@ -328,7 +328,9 @@ def _resolve_shell_write_target(raw_target: str, workdir: str | None) -> Path:
 
 def _shell_write_targets(command: str) -> list[str]:
     targets: list[str] = []
-    redirection_pattern = r"(?:^|\s)(?:\d?>{1,2}|&>{1,2})\s*(['\"]?)([^'\"\s|&;]+)\1"
+    redirection_pattern = (
+        r"(?:\d?>{1,2}|&>{1,2})\s*(['\"]?)([^'\"\s|&;]+)\1"
+    )
     targets.extend(match.group(2) for match in re.finditer(redirection_pattern, command))
     tee_pattern = r"(?:^|\s)tee(?:\s+-[A-Za-z]+)*\s+(['\"]?)([^'\"\s|&;]+)\1"
     targets.extend(match.group(2) for match in re.finditer(tee_pattern, command))

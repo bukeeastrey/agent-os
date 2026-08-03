@@ -429,12 +429,23 @@ def test_tool_definitions_include_scratch_guidance_when_configured(tmp_path: Pat
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo ok > {outside}",
+        "echo ok>{outside}",
+        "cat /etc/hosts 2>{outside}",
+        "(echo ok)>{outside}",
+    ],
+)
 async def test_workspace_lockdown_blocks_obvious_outside_shell_redirection(
     tmp_path: Path,
+    command: str,
 ) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     outside = tmp_path / "outside.txt"
+
     ctx = current_tool_context.get()
     assert ctx is not None
     ctx.interaction_mode = InteractionMode.UNATTENDED
@@ -444,7 +455,7 @@ async def test_workspace_lockdown_blocks_obvious_outside_shell_redirection(
 
     result = await shell._check_exec_approval(
         "exec_command",
-        f"echo ok > {outside}",
+        command.format(outside=outside),
         str(workspace),
         "command requires approval",
         None,
