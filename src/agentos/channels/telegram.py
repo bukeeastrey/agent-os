@@ -829,6 +829,17 @@ class TelegramChannel:
             metadata["thread_id"] = thread_id
         return OutgoingMessage(content=content, reply_to=inbound.channel_id, metadata=metadata)
 
+    def streaming_reply_kwargs(self, inbound: IncomingMessage) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {
+            "channel_id": inbound.channel_id,
+        }
+
+        thread_id = inbound.metadata.get("thread_id")
+        if thread_id is not None:
+            kwargs["thread_id"] = thread_id
+
+        return kwargs
+
     async def send_typing(
         self,
         channel_id: str | None = None,
