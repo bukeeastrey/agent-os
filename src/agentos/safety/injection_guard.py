@@ -4,9 +4,11 @@ Ingress points:
 
 * :func:`wrap_untrusted` — wrap tool output, web fetch, file read, or
   channel inbound content in ``<untrusted source='...'>...</untrusted>``
-  before it enters the LLM context. Inner payload is XML-escaped so
-  attempts to close the tag or inject sibling ``<system>`` /
-  ``<available_skills>`` elements fall through as inert entities.
+  before it enters the LLM context. Inner payload is XML-escaped (or
+  boundary-escaped when ``boundary_only=True``) so attempts to close the
+  tag or inject sibling elements become inert.
+* :func:`escape_untrusted_boundaries` — neutralize nested ``<untrusted``
+  and ``</untrusted>`` tags while preserving verbatim payload text.
 * :func:`xml_escape` — public escaping helper reused by
   :mod:`agentos.skills.filter` when assembling ``<available_skills>`` from
   skill metadata.
@@ -43,6 +45,14 @@ _UNTRUSTED_CLOSE = re.compile(r"</untrusted\s*>", re.IGNORECASE)
 _UNTRUSTED_PAIR = re.compile(
     r"<untrusted(?:\s+source=['\"][^'\"<>]*['\"])?\s*>.*?</untrusted\s*>",
     re.IGNORECASE | re.DOTALL,
+)
+_NESTED_UNTRUSTED_CLOSE: Final[re.Pattern[str]] = re.compile(
+    r"<\s*/\s*untrusted\s*>",
+    re.IGNORECASE,
+)
+_NESTED_UNTRUSTED_OPEN: Final[re.Pattern[str]] = re.compile(
+    r"<\s*untrusted\b",
+    re.IGNORECASE,
 )
 
 # Structural signals embedded in content are markers for the tool-execution
@@ -247,18 +257,46 @@ def xml_escape(text: str) -> str:
     )
 
 
-def wrap_untrusted(content: str, source: str) -> str:
+def escape_untrusted_boundaries(text: str) -> str:
+    """Neutralize nested ``<untrusted>`` and ``</untrusted>`` tags.
+
+    Replaces ``</untrusted>`` with ``&lt;/untrusted&gt;`` and
+    ``<untrusted`` with ``&lt;untrusted`` while preserving all other
+    content (including markdown, code blocks, and unrelated HTML/XML tags)
+    verbatim.
+    """
+
+    if not isinstance(text, str):
+        text = str(text)
+    out = _NESTED_UNTRUSTED_CLOSE.sub("&lt;/untrusted&gt;", text)
+    return _NESTED_UNTRUSTED_OPEN.sub("&lt;untrusted", out)
+
+
+def wrap_untrusted(content: str, source: str, *, boundary_only: bool = False) -> str:
     """Wrap ``content`` in ``<untrusted source='...'>...</untrusted>``.
 
-    Both the ``source`` attribute value and the inner ``content`` are
-    XML-escaped so closing-tag injection, CDATA bypass, and attribute
-    escape attempts become inert entities. Whitespace around the
-    envelope is intentionally preserved so the wrapper is
+    When ``boundary_only`` is ``False`` (the default), both the ``source``
+    attribute value and the inner ``content`` are XML-escaped so closing-tag
+    injection, CDATA bypass, and attribute escape attempts become inert
+    entities.
+
+    When ``boundary_only`` is ``True``, ``source`` is XML-escaped and the inner
+    ``content`` is preserved verbatim except for nested ``<untrusted`` and
+    ``</untrusted>`` envelope markers, which are neutralized by
+    :func:`escape_untrusted_boundaries`. This allows high-volume text
+    and markdown (e.g. web pages or HTTP responses) to enter the LLM context
+    without mangling their structure while guaranteeing that any embedded
+    tool calls remain enclosed within an untrusted span for dispatch refusal.
+
+    Whitespace around the envelope is intentionally preserved so the wrapper is
     concatenation-safe in prompt assembly.
     """
 
     escaped_source = xml_escape(source)
-    escaped_content = xml_escape(content)
+    if boundary_only:
+        escaped_content = escape_untrusted_boundaries(content)
+    else:
+        escaped_content = xml_escape(content)
     return f"<untrusted source='{escaped_source}'>{escaped_content}</untrusted>"
 
 
@@ -307,6 +345,7 @@ __all__ = [
     "InjectionFinding",
     "REFUSAL_REASON_TOOL_CALL_IN_UNTRUSTED",
     "classify_injection",
+    "escape_untrusted_boundaries",
     "extract_tool_call_refusal_reason",
     "is_untrusted_fragment",
     "scan_for_injection",

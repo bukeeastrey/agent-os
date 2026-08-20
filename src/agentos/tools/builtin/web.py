@@ -14,6 +14,7 @@ import httpx
 
 from agentos.env import trust_env as _trust_env
 from agentos.redact import credential_text_marker, secret_header_marker, secret_literal_marker
+from agentos.safety.injection_guard import wrap_untrusted
 from agentos.sandbox.integration import sandboxed
 from agentos.search.types import SearchProviderError, SearchResult
 from agentos.tools.path_policy import reject_foreign_host_path
@@ -249,7 +250,8 @@ async def http_request(
     body_base64_truncated = len(raw_body) > _BINARY_BODY_LIMIT
     if is_text:
         text_body = response.text
-        body = text_body[:_TEXT_BODY_LIMIT]
+        capped_text = text_body[:_TEXT_BODY_LIMIT]
+        body = wrap_untrusted(capped_text, source=str(response.url), boundary_only=True)
         body_truncated = len(text_body) > _TEXT_BODY_LIMIT
     else:
         body = None
