@@ -557,7 +557,7 @@ def test_memory_list_json_uses_gateway_rpc(monkeypatch):
 
     assert result.exit_code == 0, result.stdout
     assert json.loads(result.stdout)["files"][0]["path"] == "memory/a.md"
-    assert ("memory.list", {"agentId": "main"}) in fake.calls
+    assert ("memory.list", {"agentId": "main", "source": "all"}) in fake.calls
 
 
 def test_memory_search_and_show_use_gateway_rpcs(monkeypatch):
