@@ -511,6 +511,39 @@ uses the first one it finds: `AGENTOS_GATEWAY_CONFIG_PATH` →
 built-in defaults. But secret values set as environment variables
 always win over anything in a file.
 
+### Troubleshooting & Windows Notes
+
+#### 1. API Key Input / Secret Paste Issues (Windows CMD & PowerShell)
+When running interactive onboarding (`agentos onboard`), some terminal consoles block pasting clipboard contents into hidden password prompts. 
+
+To avoid paste issues, configure your provider non-interactively using an environment variable:
+
+* **Windows PowerShell:**
+  ```powershell
+  $env:GEMINI_API_KEY="your-api-key-here"
+  agentos onboard --provider gemini --api-key-env GEMINI_API_KEY
+  ```
+
+* **Windows Command Prompt (cmd.exe):**
+  ```cmd
+  set GEMINI_API_KEY=your-api-key-here
+  agentos onboard --provider gemini --api-key-env GEMINI_API_KEY
+  ```
+
+* **macOS / Linux:**
+  ```bash
+  export GEMINI_API_KEY="your-api-key-here"
+  agentos onboard --provider gemini --api-key-env GEMINI_API_KEY
+  ```
+
+> [!NOTE]
+> **Note for Command Prompt users:** Avoid using `$env:VAR="key"` in standard `cmd.exe`, as Command Prompt interprets `$env:` as a file/directory path and returns `The filename, directory name, or volume label syntax is incorrect.` Use standard `set VAR=value` instead.
+
+#### 2. Messaging Channel Transport Selection
+When configuring messaging channels (such as Telegram) for local execution, select **polling**.
+
+Selecting **webhook** requires a publicly accessible HTTPS domain with valid SSL certificates.
+
 ### Migrate from OpenClaw or Hermes Agent
 
 If you already have data in `~/.openclaw` or `~/.hermes`, run a dry

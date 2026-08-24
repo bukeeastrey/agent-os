@@ -85,6 +85,33 @@ export OPENAI_API_KEY="sk-..."
 agentos configure provider --provider openai --api-key-env OPENAI_API_KEY
 ```
 
+### API Key Input / Secret Paste Issues (Windows CMD & PowerShell)
+
+When running interactive onboarding (`agentos onboard`), some terminal consoles block pasting clipboard contents into hidden password prompts.
+
+To avoid paste issues, configure your provider non-interactively using an environment variable:
+
+* **Windows PowerShell:**
+  ```powershell
+  $env:GEMINI_API_KEY="your-api-key-here"
+  agentos onboard --provider gemini --api-key-env GEMINI_API_KEY
+  ```
+
+* **Windows Command Prompt (cmd.exe):**
+  ```cmd
+  set GEMINI_API_KEY=your-api-key-here
+  agentos onboard --provider gemini --api-key-env GEMINI_API_KEY
+  ```
+
+* **macOS / Linux:**
+  ```bash
+  export GEMINI_API_KEY="your-api-key-here"
+  agentos onboard --provider gemini --api-key-env GEMINI_API_KEY
+  ```
+
+> [!NOTE]
+> **Note for Command Prompt users:** Avoid using `$env:VAR="key"` in standard `cmd.exe`, as Command Prompt interprets `$env:` as a file/directory path and returns `The filename, directory name, or volume label syntax is incorrect.` Use standard `set VAR=value` instead.
+
 ## Router Dependency Problems
 
 If Pilot Router cannot load, AgentOS can still run with direct model
@@ -205,6 +232,12 @@ Restart the gateway after editing channel config:
 agentos gateway restart
 agentos channels status <name> --json
 ```
+
+### Messaging Channel Transport Selection
+
+When configuring messaging channels (such as Telegram) for local execution, select **polling**.
+
+Selecting **webhook** requires a publicly accessible HTTPS domain with valid SSL certificates.
 
 For webhook channels, confirm the gateway is reachable from the provider and
 that callback secrets match.
