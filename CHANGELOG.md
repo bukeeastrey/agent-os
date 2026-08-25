@@ -6,6 +6,106 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `aero-stock-lp` joins the Bankr skill hub. The skill range-LPs Coinbase
+  tokenized equities (NVDA, AAPL, GOOGL, META) and AERO/USDC on Aerodrome
+  Slipstream (Base) — opening, recentering, and exiting concentrated-liquidity
+  positions, reporting pool status, NAV, yields, and P&L, and routing each
+  position to whichever side pays more at this epoch, staked for AERO emissions
+  or unstaked for trading fees. It is published as a directory in
+  `BankrBot/skills`, so it browses and installs through the existing repo half
+  of the Bankr source with no new code path.
+
+### Changed
+
+- The Bankr user-skill allowlist — the half that carries skills published from
+  a wallet on bankr.bot — is now empty. `stock-premium-lp-manager` was retired
+  from it in favour of `aero-stock-lp`, which covers the same tokenized-equity
+  LP workflow from the repository. Copies already installed keep working; the
+  slug is no longer offered for browse or install.
+
+### Fixed
+
+- `agentos chat`, `agentos sessions`, `agentos skills`, and `agentos env` now
+  send the resolved gateway token when they open their own WebSocket
+  connection, and honour `AGENTOS_GATEWAY_URL` consistently. `resolve_auth`
+  grants no loopback exemption in token mode, so setting `auth.mode = "token"`
+  previously broke all four commands even on a purely local install — the
+  token resolver existed (`default_gateway_token`) but these call sites never
+  used it. `chat` additionally ignored `AGENTOS_GATEWAY_URL` entirely and
+  always dialled the hardcoded `ws://localhost:18791/ws`.
+
+- Bankr catalog cards all wear the Bankr brand mark again. `aero-stock-lp` is
+  the one entry in `BankrBot/skills` whose `catalog.json` ships a `logo`, so it
+  rendered that artwork while every other card in the partner tab showed the
+  Bankr symbol. The Bankr source now ignores the payload's logo entirely —
+  membership in the catalog is the brand, and a repository-side edit can no
+  longer repaint a partner card's identity.
+
+- The Control UI bootstrap endpoint no longer leaks host details to any website
+  the operator visits. `{control_ui.base_path}/api/bootstrap` sat inside the
+  prefix that is exempt from the loopback Origin guard, so with the default
+  `cors.allowed_origins = ["*"]` any page could `fetch()` it cross-origin and
+  read the absolute config file path (which reveals the OS username) along with
+  the configured `auth_mode`. The bootstrap payload no longer carries
+  `config_path` at all — the console reads it from the authenticated
+  `doctor.status` RPC instead — and the Origin guard's Control UI exemption now
+  stops at `{base_path}/api/`, so the shell and its fingerprinted assets stay
+  exempt while every JSON route under the prefix is fenced on the loopback
+  binds the guard covers. `AuthMiddleware` gets the same narrowing, with a
+  single carve-out for `/api/bootstrap` itself, which the console must read
+  before it holds a token. Fixes #351.
+
+- `auth.mode = "password"` no longer admits the gateway unauthenticated. The
+  mode was advertised and env-bound (`AGENTOS_AUTH_PASSWORD`) but had no branch
+  in `AuthMiddleware.dispatch`, so it fell through to the unauthenticated pass
+  and left the whole non-RPC surface — `/api/system/status`, `/api/config`,
+  `/api/v1/files/upload`, `/api/audio/transcribe` — open on a loopback bind. Any
+  typo'd mode did the same. `auth.mode` now validates against the modes the
+  gateway actually implements (`none`, `token`, `trusted-proxy`) and refuses
+  anything else at load time with a message naming the fix, and the middleware
+  fails closed with `401` on any mode without an enforcement branch — the config
+  object is read live, so a runtime mutation cannot reopen the hole. `auth.mode`
+  is also case- and whitespace-normalized now (`" TOKEN "` loads as `token`), and
+  `agentos.toml.example` plus the setup guide no longer list `password` as a
+  choice. Closes #352.
+
+- Credential masking no longer rewrites ordinary source code. The
+  `Authorization` / `x-api-key` header names matched as substrings
+  (`"requiresApiKey": False`), their value ran past the closing bracket
+  (`{"xi-api-key": api_key}` lost its `}`), a bare number was masked as a
+  credential, a vendor prefix matched mid-base64 (`AKIA…` inside an embedded
+  font blob), and a PEM block spanning two adjacent string literals swallowed
+  the code between them. Header names now match on a segment boundary, values
+  stop at the punctuation that closes them and skip numbers and `<placeholder>`
+  forms, prefixes need a left boundary, and a PEM span must have a base64 body.
+  A PEM block in a `read_file` window is masked line by line, so the line
+  numbers the reader computes its next `offset=` from stay correct.
+
+- The `NAME=value` pass now recognises quoted keys (`"client_secret": "…"`), so
+  credentials in JSON and YAML config are masked as the docstring always said
+  they were.
+
+### Security
+
+- `read_file`, `read_spreadsheet` and `grep_search` now mask credentials in the
+  content they hand back to the model, and so do the two channels that quote
+  file content alongside them: `edit_file`'s closest-match hint, and terminal
+  output from a command that reads a credential file (`cat ~/.aws/credentials`).
+  Previously the sensitive-path denylist was the only thing protecting a secrets
+  file, and that denylist is lifted entirely under elevated-full mode — which
+  cron `agent_turn` jobs run by default — so `read_file ~/.aws/credentials`
+  returned the raw keys into the persisted transcript. Masking uses a
+  non-reusable `«redacted:…»` sentinel, DSN and URL passwords included, so a
+  value read out of a config file cannot be written back over the working one.
+
+  How much of the pass runs depends on the file. Shape-matched credentials
+  (`sk-…`, JWTs, PEM blocks) are masked everywhere; the name-driven pass, the
+  only one that catches a shapeless secret like `aws_secret_access_key`, runs
+  everywhere except source code, where it would mask identifiers and hand back
+  code that no longer matches the file. Closes #355.
+
 ## [2026.8.24] - 2026-08-24
 
 ### Added
