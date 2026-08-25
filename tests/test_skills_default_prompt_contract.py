@@ -49,6 +49,7 @@ DEFAULTS = (
         "nano-pdf",
         "pdf-toolkit",
         "poolsdotfun-token-launcher",
+        "portfolio-rebalancer",
         "pptx",
         "robinhood-agentic-trading",
         "robinhood-rwa-addresses",

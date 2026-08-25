@@ -220,6 +220,7 @@ are released under AgentOS's repository license (Apache-2.0; see `LICENSE`):
 - `nano-pdf`
 - `pdf-toolkit`
 - `poolsdotfun-token-launcher`
+- `portfolio-rebalancer`
 - `pptx`
 - `robinhood-agentic-trading`
 - `robinhood-rwa-addresses`
