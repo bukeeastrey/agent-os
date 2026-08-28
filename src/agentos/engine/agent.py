@@ -1367,6 +1367,7 @@ class Agent:
                             block.name,
                             block.input,
                         ),
+                        thought_signature=block.thought_signature,
                     )
                     continue
 
@@ -1391,6 +1392,7 @@ class Agent:
                         id=block.id,
                         name=block.name,
                         input=legacy_projected_input,
+                        thought_signature=block.thought_signature,
                     )
 
         if not replacements:
@@ -2342,6 +2344,7 @@ class Agent:
                                         tool_name=raw_ev.tool_name,
                                         arguments=arguments,
                                         synthetic_from_text=synthetic_from_text,
+                                        thought_signature=raw_ev.thought_signature,
                                     )
                                 )
 
@@ -3174,6 +3177,7 @@ class Agent:
                             id=tc.tool_use_id,
                             name=tc.tool_name,
                             input=tc.arguments,
+                            thought_signature=tc.thought_signature,
                         )
                     )
                 if assistant_content:
