@@ -101,6 +101,12 @@ def _is_policy_refusal(text: str) -> bool:
             "moderation",
             "refusal",
             "blocked by policy",
+            "content_filter",
+            "content filter",
+            "responsible_ai_policy",
+            "content management policy",
+            "flagged by content filter",
+            "blocked by safety",
         )
     )
 

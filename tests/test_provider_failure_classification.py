@@ -290,3 +290,65 @@ def test_new_transient_status_codes_match_via_text(message: str) -> None:
         classify_provider_error("openrouter", None, message=message)
         is ProviderFailureKind.PROVIDER_OVERLOADED
     )
+
+
+# -- Policy refusal markers -------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("provider", "status_code", "raw_code", "message", "desc"),
+    [
+        (
+            "azure",
+            400,
+            "content_filter",
+            (
+                "The response was filtered due to the prompt triggering "
+                "Azure OpenAI's content management policy."
+            ),
+            "Azure OpenAI content filter error",
+        ),
+        (
+            "openai",
+            400,
+            "",
+            "The prompt was flagged by content filter and violates safety policy",
+            "OpenAI content filter violation",
+        ),
+        (
+            "azure",
+            400,
+            "responsible_ai_policy",
+            "Request blocked due to responsible_ai_policy violation",
+            "Responsible AI policy violation",
+        ),
+        (
+            "gemini",
+            400,
+            "BLOCKED_BY_SAFETY",
+            "Candidate was blocked by safety filters",
+            "Gemini blocked by safety",
+        ),
+        (
+            "anthropic",
+            400,
+            "policy_violation",
+            "Output generation was blocked by policy refusal",
+            "Anthropic policy refusal",
+        ),
+    ],
+    ids=lambda v: v if isinstance(v, str) and len(v) < 40 else None,
+)
+def test_provider_failure_classifies_policy_refusal_markers(
+    provider: str,
+    status_code: int,
+    raw_code: str,
+    message: str,
+    desc: str,
+) -> None:
+    """Policy refusal error messages must classify as POLICY_REFUSAL."""
+    assert (
+        classify_provider_error(provider, status_code, raw_code=raw_code, message=message)
+        is ProviderFailureKind.POLICY_REFUSAL
+    ), f"Failed for: {desc}"
+
