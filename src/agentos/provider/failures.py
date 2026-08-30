@@ -83,10 +83,14 @@ def _is_context_overflow(text: str) -> bool:
             "context window",
             "maximum context",
             "prompt is too long",
+            "prompt_too_long",
             "input is too long",
             "input exceeds",
             "provider_request_budget_exhausted",
             "too many tokens",
+            "exceed context limit",
+            "request_too_large",
+            "request size exceeds",
         )
     )
 

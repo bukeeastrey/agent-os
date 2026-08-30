@@ -290,3 +290,67 @@ def test_new_transient_status_codes_match_via_text(message: str) -> None:
         classify_provider_error("openrouter", None, message=message)
         is ProviderFailureKind.PROVIDER_OVERLOADED
     )
+
+
+# -- Anthropic-specific context overflow markers ----------------------------
+
+
+@pytest.mark.parametrize(
+    ("provider", "status_code", "raw_code", "message", "desc"),
+    [
+        (
+            "anthropic",
+            400,
+            "invalid_request_error",
+            "input length and max_tokens exceed context limit: 188240 + 21333 > 200000",
+            "canonical Anthropic 400 message",
+        ),
+        (
+            "anthropic",
+            413,
+            "request_too_large",
+            "Request exceeds the maximum allowed number of bytes",
+            "Anthropic 413 error type",
+        ),
+        (
+            "anthropic",
+            413,
+            "",
+            "Request size exceeds model context window",
+            "Anthropic 413 message variant",
+        ),
+        (
+            "anthropic",
+            400,
+            "prompt_too_long",
+            "prompt is too long",
+            "prompt_too_long raw code",
+        ),
+    ],
+    ids=lambda v: v if isinstance(v, str) and len(v) < 40 else None,
+)
+def test_anthropic_context_overflow_markers(
+    provider: str,
+    status_code: int,
+    raw_code: str,
+    message: str,
+    desc: str,
+) -> None:
+    """Anthropic context overflow messages must classify as CONTEXT_OVERFLOW."""
+    assert (
+        classify_provider_error(provider, status_code, raw_code=raw_code, message=message)
+        is ProviderFailureKind.CONTEXT_OVERFLOW
+    ), f"Failed for: {desc}"
+
+
+def test_anthropic_invalid_request_without_overflow_stays_bad_request() -> None:
+    """Anthropic invalid_request_error without overflow markers → BAD_REQUEST."""
+    assert (
+        classify_provider_error(
+            "anthropic",
+            400,
+            raw_code="invalid_request_error",
+            message="messages: roles must alternate between user and assistant",
+        )
+        is ProviderFailureKind.BAD_REQUEST
+    )
