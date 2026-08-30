@@ -290,3 +290,36 @@ def test_new_transient_status_codes_match_via_text(message: str) -> None:
         classify_provider_error("openrouter", None, message=message)
         is ProviderFailureKind.PROVIDER_OVERLOADED
     )
+
+
+def test_failure_kind_map_covers_all_provider_failure_kinds() -> None:
+    from agentos.engine.fallback import _FAILURE_KIND_MAP
+
+    for kind in ProviderFailureKind:
+        msg = f"ProviderFailureKind.{kind.name} missing from _FAILURE_KIND_MAP"
+        assert kind in _FAILURE_KIND_MAP, msg
+
+
+@pytest.mark.parametrize(
+    ("kind", "expected_error_kind", "expected_retryable"),
+    [
+        (ProviderFailureKind.MALFORMED_RESPONSE, ProviderErrorKind.TRANSPORT_TRANSIENT, True),
+        (ProviderFailureKind.INSUFFICIENT_CREDITS, ProviderErrorKind.AUTH_FAILURE, False),
+        (ProviderFailureKind.MODEL_NOT_FOUND, ProviderErrorKind.UNKNOWN, False),
+        (ProviderFailureKind.UNSUPPORTED_FEATURE, ProviderErrorKind.UNKNOWN, False),
+        (ProviderFailureKind.POLICY_REFUSAL, ProviderErrorKind.UNKNOWN, False),
+        (ProviderFailureKind.BAD_REQUEST, ProviderErrorKind.UNKNOWN, False),
+    ],
+)
+def test_fallback_policy_classification_and_retryability(
+    kind: ProviderFailureKind,
+    expected_error_kind: ProviderErrorKind,
+    expected_retryable: bool,
+) -> None:
+    from agentos.engine.fallback import _FAILURE_KIND_MAP
+
+    policy = FallbackPolicy(max_retries=2)
+    error_kind = _FAILURE_KIND_MAP[kind]
+    assert error_kind is expected_error_kind
+    assert policy.should_retry(error_kind, attempt=0) is expected_retryable
+

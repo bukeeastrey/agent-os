@@ -26,6 +26,13 @@ _FAILURE_KIND_MAP: dict[ProviderFailureKind, ProviderErrorKind] = {
     ProviderFailureKind.AUTH_INVALID: ProviderErrorKind.AUTH_FAILURE,
     ProviderFailureKind.CONTEXT_OVERFLOW: ProviderErrorKind.CONTEXT_OVERFLOW,
     ProviderFailureKind.EMPTY_RESPONSE: ProviderErrorKind.EMPTY_RESPONSE,
+    ProviderFailureKind.MALFORMED_RESPONSE: ProviderErrorKind.TRANSPORT_TRANSIENT,
+    ProviderFailureKind.INSUFFICIENT_CREDITS: ProviderErrorKind.AUTH_FAILURE,
+    ProviderFailureKind.MODEL_NOT_FOUND: ProviderErrorKind.UNKNOWN,
+    ProviderFailureKind.UNSUPPORTED_FEATURE: ProviderErrorKind.UNKNOWN,
+    ProviderFailureKind.POLICY_REFUSAL: ProviderErrorKind.UNKNOWN,
+    ProviderFailureKind.BAD_REQUEST: ProviderErrorKind.UNKNOWN,
+    ProviderFailureKind.UNKNOWN: ProviderErrorKind.UNKNOWN,
 }
 
 
