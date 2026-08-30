@@ -196,6 +196,11 @@ def decide_recovery_action(kind: ProviderFailureKind) -> ProviderRecoveryAction:
     if kind is ProviderFailureKind.CONTEXT_OVERFLOW:
         return ProviderRecoveryAction.COMPACT_AND_RETRY
     if kind in {
+        ProviderFailureKind.EMPTY_RESPONSE,
+        ProviderFailureKind.MALFORMED_RESPONSE,
+    }:
+        return ProviderRecoveryAction.RETRY
+    if kind in {
         ProviderFailureKind.PROVIDER_OVERLOADED,
         ProviderFailureKind.TRANSPORT_TRANSIENT,
     }:
