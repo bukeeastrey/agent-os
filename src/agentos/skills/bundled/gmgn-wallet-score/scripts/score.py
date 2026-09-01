@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 import json, math, subprocess, sys
 
+if len(sys.argv) < 3 or any(arg in ("-h", "--help") for arg in sys.argv[1:]):
+    print("Usage: score.py <wallet> <chain> [zh|en] [latency_s] [slippage_pct] [gas_usd] [sample]")
+    sys.exit(2)
+
 WALLET       = sys.argv[1]
 CHAIN        = sys.argv[2]
 LANG         = sys.argv[3] if len(sys.argv) > 3 else 'zh'
