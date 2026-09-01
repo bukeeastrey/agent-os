@@ -46,8 +46,6 @@ CHANNEL_RPC_METHODS: frozenset[str] = frozenset(
         "sessions.reset",
         "skills.list",
         "status",
-        "usage.savings",
-        "usage.savings.pdf",
         "usage.status",
     }
 )

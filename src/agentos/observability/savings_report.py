@@ -266,3 +266,48 @@ def _mean(values: list[float], precision: int) -> float | None:
     if not values:
         return None
     return round(sum(values) / len(values), precision)
+
+
+def savings_payload(report: SavingsReport) -> dict[str, Any]:
+    """Camel-case the report for JSON and RPC contracts."""
+
+    return {
+        "startDate": report.start_date,
+        "endDate": report.end_date,
+        "turnsTotal": report.turns_total,
+        "turnsRouted": report.turns_routed,
+        "turnsRerouted": report.turns_rerouted,
+        "turnsKept": report.turns_kept,
+        "turnsAtTopTier": report.turns_at_top_tier,
+        "actualCostUsd": report.actual_cost_usd,
+        "routingSavingsUsd": report.routing_savings_usd,
+        "topTierCostUsd": report.top_tier_cost_usd,
+        "savingsPct": report.savings_pct,
+        "avgConfidence": report.avg_confidence,
+        "tokensInput": report.tokens_input,
+        "tokensOutput": report.tokens_output,
+        "byRoute": [
+            {
+                "requestedModel": r.requested_model,
+                "routedModel": r.routed_model,
+                "turns": r.turns,
+                "savingsUsd": r.savings_usd,
+                "avgSavingsPct": r.avg_savings_pct,
+                "avgConfidence": r.avg_confidence,
+            }
+            for r in report.by_route
+        ],
+        "byDay": [
+            {
+                "date": d.date,
+                "turns": d.turns,
+                "savingsUsd": d.savings_usd,
+                "actualCostUsd": d.actual_cost_usd,
+            }
+            for d in report.by_day
+        ],
+    }
+
+
+_savings_payload = savings_payload
+

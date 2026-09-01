@@ -16,7 +16,11 @@ from agentos.cli.output import print_json
 from agentos.cli.ui import ACCENT_HEADER, console
 from agentos.observability.decision_log import _default_log_dir
 from agentos.observability.savings_pdf import render_savings_pdf
-from agentos.observability.savings_report import SavingsReport, build_savings_report
+from agentos.observability.savings_report import (
+    SavingsReport,
+    _savings_payload,
+    build_savings_report,
+)
 
 app = typer.Typer(help="Inspect usage and estimated cost.")
 
@@ -285,47 +289,6 @@ def savings(
         return
 
     _render_savings_table(report)
-
-
-def _savings_payload(report: SavingsReport) -> dict[str, Any]:
-    """Camel-case the report for the CLI JSON contract."""
-
-    return {
-        "startDate": report.start_date,
-        "endDate": report.end_date,
-        "turnsTotal": report.turns_total,
-        "turnsRouted": report.turns_routed,
-        "turnsRerouted": report.turns_rerouted,
-        "turnsKept": report.turns_kept,
-        "turnsAtTopTier": report.turns_at_top_tier,
-        "actualCostUsd": report.actual_cost_usd,
-        "routingSavingsUsd": report.routing_savings_usd,
-        "topTierCostUsd": report.top_tier_cost_usd,
-        "savingsPct": report.savings_pct,
-        "avgConfidence": report.avg_confidence,
-        "tokensInput": report.tokens_input,
-        "tokensOutput": report.tokens_output,
-        "byRoute": [
-            {
-                "requestedModel": row.requested_model,
-                "routedModel": row.routed_model,
-                "turns": row.turns,
-                "avgSavingsPct": row.avg_savings_pct,
-                "avgConfidence": row.avg_confidence,
-                "savingsUsd": row.savings_usd,
-            }
-            for row in report.by_route
-        ],
-        "byDay": [
-            {
-                "date": row.date,
-                "turns": row.turns,
-                "savingsUsd": row.savings_usd,
-                "actualCostUsd": row.actual_cost_usd,
-            }
-            for row in report.by_day
-        ],
-    }
 
 
 def _render_savings_table(report: SavingsReport) -> None:

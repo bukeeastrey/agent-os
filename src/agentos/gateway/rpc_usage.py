@@ -6,7 +6,7 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
-from agentos.gateway.access import CONTROL_AND_CHANNEL
+from agentos.gateway.access import CONTROL_AND_CHANNEL, CONTROL_ONLY
 from agentos.gateway.rpc import RpcContext, get_dispatcher
 from agentos.provider.model_catalog import ModelCatalog
 from agentos.session.cost_rollup import rollup_cost_source
@@ -796,13 +796,12 @@ async def _handle_usage_cost(params: dict | None, ctx: RpcContext) -> dict[str, 
     }
 
 
-@_d.method("usage.savings", CONTROL_AND_CHANNEL)
+@_d.method("usage.savings", CONTROL_ONLY)
 async def _handle_usage_savings(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
     from pathlib import Path
 
-    from agentos.cli.cost_cmd import _savings_payload
     from agentos.observability.decision_log import _default_log_dir
-    from agentos.observability.savings_report import build_savings_report
+    from agentos.observability.savings_report import build_savings_report, savings_payload
 
     start_date = None
     end_date = None
@@ -814,10 +813,10 @@ async def _handle_usage_savings(params: dict | None, ctx: RpcContext) -> dict[st
 
     directory = Path(log_dir) if log_dir else _default_log_dir()
     report = build_savings_report(directory, start_date=start_date, end_date=end_date)
-    return _savings_payload(report)
+    return savings_payload(report)
 
 
-@_d.method("usage.savings.pdf", CONTROL_AND_CHANNEL)
+@_d.method("usage.savings.pdf", CONTROL_ONLY)
 async def _handle_usage_savings_pdf(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
     import base64
     import tempfile
