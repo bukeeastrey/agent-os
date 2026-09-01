@@ -78,7 +78,8 @@ def _eth_call(rpc_url: str, to: str, data: str, timeout: float) -> str:
         },
     )
     if isinstance(body, dict) and "error" in body:
-        message = str(body["error"].get("message", body["error"]))
+        err = body["error"]
+        message = str(err.get("message", err)) if isinstance(err, dict) else str(err)
         raise RpcError(message)
     result = body.get("result") if isinstance(body, dict) else None
     if not isinstance(result, str) or not result.startswith("0x"):

@@ -117,6 +117,37 @@ def test_encode_address_arg_pads_to_a_full_word() -> None:
     assert encoded.endswith(AAPL[2:])
 
 
+def test_eth_call_handles_string_and_dict_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Dict error with message
+    monkeypatch.setattr(
+        chain_stocks,
+        "_http_json",
+        lambda *args, **kwargs: {
+            "jsonrpc": "2.0",
+            "error": {"message": "execution reverted", "code": -32000},
+        },
+    )
+    with pytest.raises(chain_stocks.RpcError, match="execution reverted"):
+        chain_stocks._eth_call("rpc", AAPL, "0x", 5.0)
+
+    # String error
+    monkeypatch.setattr(
+        chain_stocks,
+        "_http_json",
+        lambda *args, **kwargs: {"jsonrpc": "2.0", "error": "rate limit exceeded"},
+    )
+    with pytest.raises(chain_stocks.RpcError, match="rate limit exceeded"):
+        chain_stocks._eth_call("rpc", AAPL, "0x", 5.0)
+
+    # Successful call
+    monkeypatch.setattr(
+        chain_stocks,
+        "_http_json",
+        lambda *args, **kwargs: {"jsonrpc": "2.0", "result": "0x1234"},
+    )
+    assert chain_stocks._eth_call("rpc", AAPL, "0x", 5.0) == "0x1234"
+
+
 # --- impersonation guard ----------------------------------------------------
 
 
