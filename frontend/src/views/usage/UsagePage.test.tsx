@@ -73,10 +73,51 @@ const SESSIONS = [
   },
 ]
 
-function wire(sessions: unknown[] = SESSIONS, reject = false) {
+const SAVINGS_REPORT = {
+  startDate: '2026-08-25',
+  endDate: '2026-09-01',
+  turnsTotal: 10,
+  turnsRouted: 8,
+  turnsRerouted: 6,
+  turnsKept: 2,
+  turnsAtTopTier: 1,
+  actualCostUsd: 0.125,
+  routingSavingsUsd: 0.45,
+  topTierCostUsd: 0.575,
+  savingsPct: 78.26,
+  avgConfidence: 0.942,
+  tokensInput: 15000,
+  tokensOutput: 3000,
+  byRoute: [
+    {
+      requestedModel: 'anthropic/claude-3-opus',
+      routedModel: 'anthropic/claude-3-5-sonnet',
+      turns: 6,
+      avgSavingsPct: 80.0,
+      avgConfidence: 0.96,
+      savingsUsd: 0.42,
+    },
+  ],
+  byDay: [
+    {
+      date: '2026-09-01',
+      turns: 6,
+      savingsUsd: 0.42,
+      actualCostUsd: 0.1,
+    },
+  ],
+}
+
+function wire(sessions: unknown[] = SESSIONS, reject = false, savings = SAVINGS_REPORT) {
   mockRpc.call.mockImplementation((method: string) => {
     if (method === 'usage.status') {
       return reject ? Promise.reject(new Error('boom')) : Promise.resolve({ sessions })
+    }
+    if (method === 'usage.savings') {
+      return reject ? Promise.reject(new Error('boom')) : Promise.resolve(savings)
+    }
+    if (method === 'usage.savings.pdf') {
+      return Promise.resolve({ pdfBase64: 'JVBERi0xLjQK', filename: 'savings.pdf' })
     }
     return Promise.resolve({})
   })
@@ -102,6 +143,8 @@ describe('UsagePage', () => {
     vi.mocked(toast.success).mockClear()
     vi.mocked(toast.error).mockClear()
     localStorage.clear()
+    URL.createObjectURL = vi.fn().mockReturnValue('blob:mock')
+    URL.revokeObjectURL = vi.fn()
   })
   afterEach(() => {
     localStorage.clear()
@@ -270,5 +313,35 @@ describe('UsagePage', () => {
     wire()
     renderPage()
     await waitFor(() => expect(document.title).toBe('Usage - AgentOS Control'))
+  })
+
+  it('switches to the Pilot Router Savings & ROI tab and displays savings metrics and route breakdown', async () => {
+    wire()
+    renderPage()
+    await waitFor(() =>
+      expect(screen.getByRole('tab', { name: /Pilot Router Savings & ROI/i })).toBeInTheDocument(),
+    )
+
+    fireEvent.click(screen.getByRole('tab', { name: /Pilot Router Savings & ROI/i }))
+    await waitFor(() =>
+      expect(screen.getByText('Pilot Router Financial ROI & Savings')).toBeInTheDocument(),
+    )
+    expect(screen.getByText('78.3%')).toBeInTheDocument()
+    expect(screen.getByText('anthropic/claude-3-opus')).toBeInTheDocument()
+    expect(screen.getByText('anthropic/claude-3-5-sonnet')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Download PDF Report/i })).toBeInTheDocument()
+  })
+
+  it('triggers PDF export download when clicking Download PDF Report in Savings tab', async () => {
+    wire()
+    renderPage()
+    fireEvent.click(screen.getByRole('tab', { name: /Pilot Router Savings & ROI/i }))
+    const downloadBtn = await screen.findByRole('button', { name: /Download PDF Report/i })
+    await waitFor(() => expect(downloadBtn).not.toBeDisabled())
+
+    fireEvent.click(downloadBtn)
+    await waitFor(() =>
+      expect(mockRpc.call).toHaveBeenCalledWith('usage.savings.pdf', expect.any(Object)),
+    )
   })
 })

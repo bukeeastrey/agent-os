@@ -10,7 +10,11 @@ import {
   CoinsIcon,
   CpuIcon,
   DownloadIcon,
+  FileTextIcon,
   RefreshCwIcon,
+  ShieldCheckIcon,
+  SparklesIcon,
+  TrendingUpIcon,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -22,8 +26,10 @@ import {
   chartRows,
   costSourceBadge,
   csvFilename,
+  formatConfidence,
   formatCost,
   formatRelTime,
+  formatSavingsPct,
   hasModelExpand,
   modelBreakdownGrid,
   modelDisplayLabel,
@@ -38,6 +44,8 @@ import {
   visibleSessions,
   type ChartMode,
   type CostSourceBadge,
+  type SavingsPdfResponse,
+  type SavingsReportPayload,
   type SortColumn,
   type UsageRange,
   type UsageRow,
@@ -168,6 +176,8 @@ export function UsagePage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
 
+  const [activeTab, setActiveTab] = useState<'usage' | 'savings'>('usage')
+  const [isExportingPdf, setIsExportingPdf] = useState(false)
   const [range, setRange] = useState<UsageRange>(() =>
     normalizeRange(typeof localStorage !== 'undefined' ? localStorage.getItem(RANGE_KEY) : null),
   )
@@ -190,6 +200,22 @@ export function UsagePage() {
       await rpc.waitForConnection()
       const status = await rpc.call<UsageStatus>('usage.status')
       return status.sessions ?? []
+    },
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: true,
+  })
+
+  const savingsQuery = useQuery<SavingsReportPayload>({
+    queryKey: ['usage.savings', range],
+    queryFn: async () => {
+      await rpc.waitForConnection()
+      let startDate: string | undefined
+      if (range !== 'all') {
+        const d = new Date(Date.now() - parseInt(range, 10) * 86_400_000)
+        startDate = d.toISOString().split('T')[0]
+      }
+      return await rpc.call<SavingsReportPayload>('usage.savings', startDate ? { startDate } : {})
     },
     refetchInterval: 60_000,
     refetchIntervalInBackground: false,
@@ -259,6 +285,43 @@ export function UsagePage() {
     URL.revokeObjectURL(url)
   }
 
+  async function exportSavingsPdf() {
+    try {
+      setIsExportingPdf(true)
+      await rpc.waitForConnection()
+      let startDate: string | undefined
+      if (range !== 'all') {
+        const d = new Date(Date.now() - parseInt(range, 10) * 86_400_000)
+        startDate = d.toISOString().split('T')[0]
+      }
+      const res = await rpc.call<SavingsPdfResponse>(
+        'usage.savings.pdf',
+        startDate ? { startDate } : {},
+      )
+      if (res?.pdfBase64) {
+        const byteCharacters = atob(res.pdfBase64)
+        const byteNumbers = new Array(byteCharacters.length)
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i)
+        }
+        const byteArray = new Uint8Array(byteNumbers)
+        const blob = new Blob([byteArray], { type: 'application/pdf' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = res.filename || 'pilot-router-savings.pdf'
+        a.click()
+        URL.revokeObjectURL(url)
+        toast.success(t('usage.toastPdfSuccess'))
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      toast.error(t('usage.toastPdfFailed', { message }))
+    } finally {
+      setIsExportingPdf(false)
+    }
+  }
+
   const sessionMeta = [tPlural('usage.sessionCount', sorted.length), hiddenHint]
     .filter(Boolean)
     .join(' · ')
@@ -283,38 +346,124 @@ export function UsagePage() {
     <div className="usage-stage">
       <header className="usage-stage__header">
         <div className="usage-stage__title-block">
-          <span className="t-label">{t('usage.eyebrow')}</span>
-          <h1 className="t-display">{t('usage.title')}</h1>
-          <p className="usage-stage__subtitle">{t('usage.subtitle')}</p>
-          {hiddenHint ? (
+          <span className="t-label">
+            {activeTab === 'savings' ? t('usage.savingsEyebrow') : t('usage.eyebrow')}
+          </span>
+          <h1 className="t-display">
+            {activeTab === 'savings' ? t('usage.savingsTitle') : t('usage.title')}
+          </h1>
+          <p className="usage-stage__subtitle">
+            {activeTab === 'savings' ? t('usage.savingsSubtitle') : t('usage.subtitle')}
+          </p>
+          {activeTab === 'usage' && hiddenHint ? (
             <small className="usage-range-notice" aria-live="polite">
               {hiddenHint}
             </small>
           ) : null}
         </div>
         <div className="usage-stage__actions">
-          <Button
-            variant="outline"
-            title={t('usage.exportTitle')}
-            disabled={visible.length === 0}
-            onClick={exportCsv}
-          >
-            <DownloadIcon />
-            <span>{t('usage.export')}</span>
-          </Button>
+          {activeTab === 'savings' ? (
+            <Button
+              variant="outline"
+              title={t('usage.exportPdfTitle')}
+              disabled={isExportingPdf || savingsQuery.isPending}
+              onClick={() => void exportSavingsPdf()}
+            >
+              {isExportingPdf ? <RefreshCwIcon className="usage-spin" /> : <FileTextIcon />}
+              <span>{isExportingPdf ? t('usage.exportPdfBusy') : t('usage.exportPdf')}</span>
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              title={t('usage.exportTitle')}
+              disabled={visible.length === 0}
+              onClick={exportCsv}
+            >
+              <DownloadIcon />
+              <span>{t('usage.export')}</span>
+            </Button>
+          )}
           <Button
             variant="outline"
             title={t('usage.refresh')}
-            disabled={usageQuery.isFetching}
-            onClick={() => void queryClient.invalidateQueries({ queryKey: ['usage'] })}
+            disabled={activeTab === 'savings' ? savingsQuery.isFetching : usageQuery.isFetching}
+            onClick={() => {
+              if (activeTab === 'savings') {
+                void queryClient.invalidateQueries({ queryKey: ['usage.savings'] })
+              } else {
+                void queryClient.invalidateQueries({ queryKey: ['usage'] })
+              }
+            }}
           >
-            <RefreshCwIcon className={usageQuery.isFetching ? 'usage-spin' : undefined} />
-            <span>{usageQuery.isFetching ? t('usage.refreshBusy') : t('usage.refresh')}</span>
+            <RefreshCwIcon
+              className={
+                (activeTab === 'savings' ? savingsQuery.isFetching : usageQuery.isFetching)
+                  ? 'usage-spin'
+                  : undefined
+              }
+            />
+            <span>
+              {(activeTab === 'savings' ? savingsQuery.isFetching : usageQuery.isFetching)
+                ? t('usage.refreshBusy')
+                : t('usage.refresh')}
+            </span>
           </Button>
         </div>
       </header>
 
-      {usageQuery.isPending ? (
+      <div className="usage-nav-tabs" role="tablist" aria-label={t('usage.title')}>
+        <button
+          role="tab"
+          type="button"
+          className={`usage-nav-tab${activeTab === 'usage' ? ' is-active' : ''}`}
+          aria-selected={activeTab === 'usage'}
+          onClick={() => setActiveTab('usage')}
+        >
+          <ActivityIcon aria-hidden="true" />
+          <span>{t('usage.tabUsage')}</span>
+        </button>
+        <button
+          role="tab"
+          type="button"
+          className={`usage-nav-tab${activeTab === 'savings' ? ' is-active' : ''}`}
+          aria-selected={activeTab === 'savings'}
+          onClick={() => setActiveTab('savings')}
+        >
+          <TrendingUpIcon aria-hidden="true" />
+          <span>{t('usage.tabSavings')}</span>
+        </button>
+      </div>
+
+      {activeTab === 'savings' ? (
+        savingsQuery.isPending ? (
+          <UsageLoading />
+        ) : savingsQuery.isError ? (
+          <section className="usage-error" role="alert">
+            <div className="usage-error__icon" aria-hidden="true">
+              <ActivityIcon />
+            </div>
+            <div>
+              <h2>{t('usage.errorTitle')}</h2>
+              <p>
+                {savingsQuery.error instanceof Error
+                  ? savingsQuery.error.message
+                  : t('usage.errorFallback')}
+              </p>
+            </div>
+            <Button variant="outline" onClick={() => void savingsQuery.refetch()}>
+              <RefreshCwIcon />
+              {t('common.retry')}
+            </Button>
+          </section>
+        ) : (
+          <SavingsPanel
+            report={savingsQuery.data ?? null}
+            range={range}
+            rangeLabel={rangeLabel}
+            onPickRange={pickRange}
+          />
+        )
+      ) : usageQuery.isPending ? (
         <UsageLoading />
       ) : usageQuery.isError ? (
         <section className="usage-error" role="alert">
@@ -648,6 +797,215 @@ export function UsagePage() {
           </section>
         </>
       )}
+    </div>
+  )
+}
+
+interface SavingsPanelProps {
+  report: SavingsReportPayload | null
+  range: UsageRange
+  rangeLabel: string
+  onPickRange: (range: UsageRange) => void
+}
+
+function SavingsPanel({ report, range, rangeLabel, onPickRange }: SavingsPanelProps) {
+  const routes = report?.byRoute ?? []
+  const hasData = (report?.turnsRouted ?? 0) > 0 || routes.length > 0
+
+  return (
+    <div className="usage-savings-view">
+      <section className="usage-overview" aria-label={t('usage.summaryLandmark')}>
+        <div className="usage-overview__toolbar">
+          <div>
+            <span className="usage-overview__eyebrow">{t('usage.billingWindow')}</span>
+            <strong className="usage-overview__window">{rangeLabel}</strong>
+          </div>
+          <div className="usage-range" role="group" aria-label={t('usage.dateRange')}>
+            {RANGE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                className={`usage-range__btn${range === opt.value ? ' is-active' : ''}`}
+                aria-pressed={range === opt.value}
+                onClick={() => onPickRange(opt.value)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="usage-overview__body">
+          <div
+            className="usage-overview__spend usage-savings__highlight"
+            aria-label={t('usage.metricSaved')}
+          >
+            <span className="usage-overview__metric-label">
+              <SparklesIcon aria-hidden="true" />
+              {t('usage.metricSaved')}
+            </span>
+            <strong className="usage-overview__spend-value t-data">
+              {formatCost(report?.routingSavingsUsd ?? 0, { decimals: 4 })}
+            </strong>
+            <span className="usage-overview__hint">
+              {t('usage.hintSavedPct', { pct: (report?.savingsPct ?? 0).toFixed(1) })}
+            </span>
+          </div>
+
+          <div className="usage-overview__tokens" aria-label={t('usage.metricSavedPct')}>
+            <span className="usage-overview__metric-label">
+              <TrendingUpIcon aria-hidden="true" />
+              {t('usage.metricSavedPct')}
+            </span>
+            <strong className="usage-overview__token-value t-data">
+              {formatSavingsPct(report?.savingsPct)}
+            </strong>
+            <dl className="usage-overview__token-grid">
+              <div>
+                <dt>{t('usage.metricActualVsTop')}</dt>
+                <dd className="t-data">
+                  {formatCost(report?.actualCostUsd ?? 0)} /{' '}
+                  {formatCost(report?.topTierCostUsd ?? 0)}
+                </dd>
+              </div>
+              <div>
+                <dt>{t('usage.avgConfidence')}</dt>
+                <dd className="t-data">{formatConfidence(report?.avgConfidence)}</dd>
+              </div>
+              <div>
+                <dt>{t('usage.dtInput')}</dt>
+                <dd className="t-data">{(report?.tokensInput ?? 0).toLocaleString()}</dd>
+              </div>
+              <div>
+                <dt>{t('usage.dtOutput')}</dt>
+                <dd className="t-data">{(report?.tokensOutput ?? 0).toLocaleString()}</dd>
+              </div>
+            </dl>
+          </div>
+
+          <dl className="usage-overview__supporting">
+            <div aria-label={t('usage.routedTurnsLandmark')}>
+              <dt>{t('usage.dtTurnsRouted')}</dt>
+              <dd className="t-data">{(report?.turnsRouted ?? 0).toLocaleString()}</dd>
+              <dd className="usage-overview__supporting-hint">
+                {t('usage.hintReroutedTurns', {
+                  count: (report?.turnsRerouted ?? 0).toLocaleString(),
+                })}
+              </dd>
+            </div>
+            <div aria-label={t('usage.avgConfidence')}>
+              <dt>{t('usage.metricConfidence')}</dt>
+              <dd className="t-data">{formatConfidence(report?.avgConfidence)}</dd>
+              <dd className="usage-overview__supporting-hint">
+                {t('usage.hintKeptTurns', { count: (report?.turnsKept ?? 0).toLocaleString() })}
+              </dd>
+            </div>
+          </dl>
+        </div>
+      </section>
+
+      {/* Turns Distribution Grid */}
+      <section className="usage-savings-grid" aria-label={t('usage.routedTurnsLandmark')}>
+        <div className="usage-savings-card">
+          <span className="usage-savings-card__icon">
+            <CpuIcon aria-hidden="true" />
+          </span>
+          <div className="usage-savings-card__content">
+            <dt>{t('usage.dtTurnsRouted')}</dt>
+            <dd className="t-data">{(report?.turnsRouted ?? 0).toLocaleString()}</dd>
+            <small>{t('usage.descTotalDecisions')}</small>
+          </div>
+        </div>
+
+        <div className="usage-savings-card usage-savings-card--accent">
+          <span className="usage-savings-card__icon">
+            <SparklesIcon aria-hidden="true" />
+          </span>
+          <div className="usage-savings-card__content">
+            <dt>{t('usage.dtTurnsRerouted')}</dt>
+            <dd className="t-data">{(report?.turnsRerouted ?? 0).toLocaleString()}</dd>
+            <small>{t('usage.descMovedTier')}</small>
+          </div>
+        </div>
+
+        <div className="usage-savings-card">
+          <span className="usage-savings-card__icon">
+            <ShieldCheckIcon aria-hidden="true" />
+          </span>
+          <div className="usage-savings-card__content">
+            <dt>{t('usage.dtTurnsKept')}</dt>
+            <dd className="t-data">{(report?.turnsKept ?? 0).toLocaleString()}</dd>
+            <small>{t('usage.descMatchedTier')}</small>
+          </div>
+        </div>
+
+        <div className="usage-savings-card">
+          <span className="usage-savings-card__icon">
+            <CoinsIcon aria-hidden="true" />
+          </span>
+          <div className="usage-savings-card__content">
+            <dt>{t('usage.dtTurnsTopTier')}</dt>
+            <dd className="t-data">{(report?.turnsAtTopTier ?? 0).toLocaleString()}</dd>
+            <small>{t('usage.descTopTier')}</small>
+          </div>
+        </div>
+      </section>
+
+      {/* Route Breakdown Table */}
+      <section className="usage-sessions">
+        <div className="usage-section-head">
+          <div>
+            <h2 className="usage-section-title">{t('usage.routesTableTitle')}</h2>
+            <p>{t('usage.routesTableSubtitle')}</p>
+          </div>
+          <span className="usage-section-meta t-data">
+            {tPlural('usage.routeCount', routes.length)}
+          </span>
+        </div>
+
+        {!hasData || routes.length === 0 ? (
+          <div className="usage-bars__empty">
+            <TrendingUpIcon className="usage-bars__empty-icon" aria-hidden="true" />
+            <strong>{t('usage.noSavingsData')}</strong>
+            <span>{t('usage.noSavingsDataHint')}</span>
+          </div>
+        ) : (
+          <div className="usage-table-wrap">
+            <table className="usage-table">
+              <thead>
+                <tr>
+                  <th>{t('usage.colRequestedModel')}</th>
+                  <th>{t('usage.colRoutedModel')}</th>
+                  <th className="usage-th-num">{t('usage.colTurns')}</th>
+                  <th className="usage-th-num">{t('usage.colAvgSavingsPct')}</th>
+                  <th className="usage-th-num">{t('usage.colConfidence')}</th>
+                  <th className="usage-th-num">{t('usage.colSavedUsd')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {routes.map((r, i) => (
+                  <tr key={`${r.requestedModel}-${r.routedModel}-${i}`} className="usage-row">
+                    <td>
+                      <span className="usage-model-tag">{r.requestedModel}</span>
+                    </td>
+                    <td>
+                      <span className="usage-model-tag usage-model-tag--routed">
+                        {r.routedModel}
+                      </span>
+                    </td>
+                    <td className="usage-cell-num t-data">{r.turns.toLocaleString()}</td>
+                    <td className="usage-cell-num t-data">{formatSavingsPct(r.avgSavingsPct)}</td>
+                    <td className="usage-cell-num t-data">{formatConfidence(r.avgConfidence)}</td>
+                    <td className="usage-cell-num t-data usage-cost">
+                      {formatCost(r.savingsUsd, { decimals: 4 })}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
     </div>
   )
 }

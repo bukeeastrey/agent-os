@@ -240,6 +240,44 @@ def create_gateway_app(
         msg = result.error.message if result.error else "error"
         return JSONResponse({"error": msg}, status_code=_rpc_status_code(result))
 
+    async def api_usage_savings(request: Request) -> JSONResponse:
+        ctx = _make_ctx(request)
+        start_date = request.query_params.get("startDate") or request.query_params.get("start_date")
+        end_date = request.query_params.get("endDate") or request.query_params.get("end_date")
+        params = {}
+        if start_date:
+            params["startDate"] = start_date
+        if end_date:
+            params["endDate"] = end_date
+        result = await dispatcher.dispatch("_http", "usage.savings", params, ctx)
+        if result.ok:
+            return JSONResponse(result.payload or {})
+        msg = result.error.message if result.error else "error"
+        return JSONResponse({"error": msg}, status_code=_rpc_status_code(result))
+
+    async def api_usage_savings_pdf(request: Request) -> Response:
+        import base64
+
+        ctx = _make_ctx(request)
+        start_date = request.query_params.get("startDate") or request.query_params.get("start_date")
+        end_date = request.query_params.get("endDate") or request.query_params.get("end_date")
+        params = {}
+        if start_date:
+            params["startDate"] = start_date
+        if end_date:
+            params["endDate"] = end_date
+        result = await dispatcher.dispatch("_http", "usage.savings.pdf", params, ctx)
+        if result.ok and result.payload:
+            pdf_bytes = base64.b64decode(result.payload.get("pdfBase64", ""))
+            filename = result.payload.get("filename", "pilot-router-savings.pdf")
+            return Response(
+                pdf_bytes,
+                media_type="application/pdf",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+        msg = result.error.message if result.error else "error"
+        return JSONResponse({"error": msg}, status_code=_rpc_status_code(result))
+
     def _extract_http_token(request: Request | None) -> str | None:
         if request is None:
             return None
@@ -551,6 +589,9 @@ def create_gateway_app(
         Route("/api/cron", api_cron, methods=["GET"]),
         Route("/api/system/status", api_system_status, methods=["GET"]),
         Route("/api/usage", api_usage, methods=["GET"]),
+        Route("/api/usage/savings", api_usage_savings, methods=["GET"]),
+        Route("/api/usage/savings/pdf", api_usage_savings_pdf, methods=["GET"]),
+        Route("/api/usage/savings.pdf", api_usage_savings_pdf, methods=["GET"]),
         Route("/api/channels/status", api_channels_status, methods=["GET"]),
         Route("/api/channels/logout", api_channels_logout, methods=["POST"]),
         Route("/api/approvals", api_approvals, methods=["GET"]),

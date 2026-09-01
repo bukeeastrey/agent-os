@@ -687,3 +687,57 @@ export function csvFilename(range: UsageRange): string {
   const suffix = range === 'all' ? 'all' : `${range}d`
   return `agentos-usage-${suffix}.csv`
 }
+
+// ── Pilot Router Savings & ROI (savings_report.py) ───────────────────────────
+
+export interface RouteRowPayload {
+  requestedModel: string
+  routedModel: string
+  turns: number
+  avgSavingsPct: number | null
+  avgConfidence: number | null
+  savingsUsd: number
+}
+
+export interface DayRowPayload {
+  date: string
+  turns: number
+  savingsUsd: number
+  actualCostUsd: number
+}
+
+export interface SavingsReportPayload {
+  startDate: string | null
+  endDate: string | null
+  turnsTotal: number
+  turnsRouted: number
+  turnsRerouted: number
+  turnsKept: number
+  turnsAtTopTier: number
+  actualCostUsd: number
+  routingSavingsUsd: number
+  topTierCostUsd: number
+  savingsPct: number
+  avgConfidence: number | null
+  tokensInput: number
+  tokensOutput: number
+  byRoute: RouteRowPayload[]
+  byDay: DayRowPayload[]
+}
+
+export interface SavingsPdfResponse {
+  pdfBase64: string
+  filename: string
+}
+
+/** Helper to format savings percentage cleanly (e.g. 74.2% or —). */
+export function formatSavingsPct(pct: number | null | undefined): string {
+  if (pct == null || !Number.isFinite(pct)) return '—'
+  return `${pct.toFixed(1)}%`
+}
+
+/** Helper to format confidence cleanly (e.g. 96.4% or —). */
+export function formatConfidence(conf: number | null | undefined): string {
+  if (conf == null || !Number.isFinite(conf)) return '—'
+  return `${(conf * 100).toFixed(1)}%`
+}

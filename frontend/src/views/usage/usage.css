@@ -1256,3 +1256,165 @@
     transition: none;
   }
 }
+
+/* ── Nav Tabs & Pilot Router Savings Views ───────────────────────────────── */
+
+.usage-nav-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+  padding: 0.25rem;
+  border-radius: var(--radius-sm, 8px);
+  background: var(--muted, rgba(255, 255, 255, 0.04));
+  width: fit-content;
+}
+
+.usage-nav-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--muted-foreground, #888);
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  font-weight: 550;
+  cursor: pointer;
+  transition: all 160ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.usage-nav-tab svg {
+  width: 0.9375rem;
+  height: 0.9375rem;
+}
+
+.usage-nav-tab:hover {
+  color: var(--foreground);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.usage-nav-tab.is-active {
+  border-color: var(--border);
+  background: var(--surface);
+  color: var(--foreground);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.usage-savings__highlight {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--primary) 12%, transparent),
+    color-mix(in srgb, var(--surface) 90%, transparent)
+  );
+  border-radius: var(--radius-sm, 8px);
+  padding: 1.25rem;
+}
+
+.usage-savings-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+@media (max-width: 900px) {
+  .usage-savings-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 500px) {
+  .usage-savings-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.usage-savings-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.875rem;
+  padding: 1.125rem 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-surface);
+  background: var(--usage-surface);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.usage-savings-card--accent {
+  border-color: color-mix(in srgb, var(--primary) 40%, var(--border));
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--primary) 8%, var(--usage-surface)),
+    var(--usage-surface)
+  );
+}
+
+.usage-savings-card__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: var(--radius-sm, 6px);
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+.usage-savings-card__icon svg {
+  width: 1.125rem;
+  height: 1.125rem;
+}
+
+.usage-savings-card__content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.usage-savings-card__content dt {
+  color: var(--dim, #888);
+  font-size: 0.6875rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.usage-savings-card__content dd {
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.usage-savings-card__content small {
+  color: var(--muted-foreground, #777);
+  font-size: 0.6875rem;
+}
+
+.usage-model-tag {
+  display: inline-block;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+  word-break: break-all;
+}
+
+.usage-model-tag--routed {
+  border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
+  background: color-mix(in srgb, var(--primary) 10%, var(--surface));
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.usage-th-num,
+.usage-cell-num {
+  text-align: right;
+}

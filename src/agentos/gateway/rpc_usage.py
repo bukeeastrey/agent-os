@@ -794,3 +794,62 @@ async def _handle_usage_cost(params: dict | None, ctx: RpcContext) -> dict[str, 
         "breakdown": [],
         "totalCostUsd": 0.0,
     }
+
+
+@_d.method("usage.savings", CONTROL_AND_CHANNEL)
+async def _handle_usage_savings(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
+    from pathlib import Path
+
+    from agentos.cli.cost_cmd import _savings_payload
+    from agentos.observability.decision_log import _default_log_dir
+    from agentos.observability.savings_report import build_savings_report
+
+    start_date = None
+    end_date = None
+    log_dir = None
+    if isinstance(params, dict):
+        start_date = params.get("startDate") or params.get("start_date")
+        end_date = params.get("endDate") or params.get("end_date")
+        log_dir = params.get("logDir") or params.get("log_dir")
+
+    directory = Path(log_dir) if log_dir else _default_log_dir()
+    report = build_savings_report(directory, start_date=start_date, end_date=end_date)
+    return _savings_payload(report)
+
+
+@_d.method("usage.savings.pdf", CONTROL_AND_CHANNEL)
+async def _handle_usage_savings_pdf(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
+    import base64
+    import tempfile
+    from pathlib import Path
+
+    from agentos.observability.decision_log import _default_log_dir
+    from agentos.observability.savings_pdf import render_savings_pdf
+    from agentos.observability.savings_report import build_savings_report
+
+    start_date = None
+    end_date = None
+    log_dir = None
+    if isinstance(params, dict):
+        start_date = params.get("startDate") or params.get("start_date")
+        end_date = params.get("endDate") or params.get("end_date")
+        log_dir = params.get("logDir") or params.get("log_dir")
+
+    directory = Path(log_dir) if log_dir else _default_log_dir()
+    report = build_savings_report(directory, start_date=start_date, end_date=end_date)
+
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+    try:
+        render_savings_pdf(report, tmp_path)
+        pdf_bytes = tmp_path.read_bytes()
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
+
+    date_tag = f"{report.start_date or 'all'}-to-{report.end_date or 'all'}"
+    return {
+        "pdfBase64": base64.b64encode(pdf_bytes).decode("ascii"),
+        "filename": f"pilot-router-savings-{date_tag}.pdf",
+    }
+
