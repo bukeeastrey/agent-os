@@ -92,7 +92,8 @@ describe('routes', () => {
 
   it('sets the document title from the route', async () => {
     renderAt('/cron')
-    await waitFor(() => expect(document.title).toBe('Cron - AgentOS Control'))
+    expect(await screen.findByRole('heading', { name: 'Cron' })).toBeInTheDocument()
+    expect(document.title).toBe('Cron - AgentOS Control')
   })
 
   // M1 — parity: router.js:68-71 — an unmatched route has no meta.title, so the
@@ -830,10 +831,12 @@ describe('navigation shortcuts in AppShell', () => {
     await waitFor(() => expect(router.state.location.pathname).toBe('/chat'))
 
     // Wait for the composer to autofocus, then blur it so it is not focused
-    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Message' })).toHaveFocus())
-    act(() => {
-      ;(document.activeElement as HTMLElement)?.blur()
-    })
+    const composer = await screen.findByRole('textbox', { name: 'Message' })
+    await waitFor(() => expect(composer).toHaveFocus())
+    fireEvent.blur(composer)
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur()
+    }
 
     press({ key: 'g', code: 'KeyG' })
     press({ key: 'h', code: 'KeyH' })
