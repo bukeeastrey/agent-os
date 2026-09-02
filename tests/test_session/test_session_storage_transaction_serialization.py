@@ -258,3 +258,134 @@ async def test_concurrent_delete_project_and_sessions() -> None:
         assert await storage.get_project(project_id) is None
     finally:
         await storage.close()
+
+
+@pytest.mark.asyncio
+async def test_nested_transaction_reentrancy_and_rollback() -> None:
+    """Nested transactions and method calls within transactions execute safely without deadlocks."""
+    storage = SessionStorage(":memory:")
+    await storage.connect()
+    try:
+        key1 = "agent:main:direct:nested-1"
+        key2 = "agent:main:direct:nested-2"
+        await storage.upsert_session(
+            SessionNode(
+                session_key=key1,
+                session_id="sess-n1",
+                created_at=_T0,
+                updated_at=_T0,
+            )
+        )
+        await storage.upsert_session(
+            SessionNode(
+                session_key=key2,
+                session_id="sess-n2",
+                created_at=_T0,
+                updated_at=_T0,
+            )
+        )
+
+        # Test 1: Re-entrant transaction call (calling delete_session inside transaction)
+        async with storage.transaction():
+            # delete_session also takes transaction()
+            await storage.delete_session(key1)
+            # writer method taking _write_context
+            await storage.append_transcript_entry(
+                TranscriptEntry(
+                    session_id="sess-n2",
+                    session_key=key2,
+                    message_id="msg-nested",
+                    role="user",
+                    content="nested content",
+                    created_at=_T0,
+                )
+            )
+
+        assert await storage.get_session(key1) is None
+        assert len(await storage.get_transcript("sess-n2")) == 1
+
+        # Test 2: Nested transaction rollback rolls back both outer and inner writes
+        with pytest.raises(ValueError, match="abort outer"):
+            async with storage.transaction():
+                await storage.upsert_session(
+                    SessionNode(
+                        session_key=key1,
+                        session_id="sess-n1-again",
+                        created_at=_T0,
+                        updated_at=_T0,
+                    )
+                )
+                async with storage.transaction():
+                    await storage.append_transcript_entry(
+                        TranscriptEntry(
+                            session_id="sess-n1-again",
+                            session_key=key1,
+                            message_id="msg-aborted",
+                            role="user",
+                            content="aborted",
+                            created_at=_T0,
+                        )
+                    )
+                raise ValueError("abort outer")
+
+        assert await storage.get_session(key1) is None
+        assert await storage.get_transcript("sess-n1-again") == []
+    finally:
+        await storage.close()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_mixed_transactions_and_writers() -> None:
+    """Stress test: mixed concurrent writers, deletes, and transactions on different sessions."""
+    storage = SessionStorage(":memory:")
+    await storage.connect()
+    try:
+        num_sessions = 15
+        keys = [f"agent:main:direct:stress-{i}" for i in range(num_sessions)]
+
+        for i, key in enumerate(keys):
+            await _seed_session(
+                storage,
+                session_key=key,
+                session_id=f"stress-sess-{i}",
+                task_id=f"stress-task-{i}",
+            )
+
+        async def _writer_loop(key: str, sess_id: str) -> None:
+            for j in range(5):
+                await storage.append_transcript_entry(
+                    TranscriptEntry(
+                        session_id=sess_id,
+                        session_key=key,
+                        message_id=f"msg-loop-{j}",
+                        role="assistant",
+                        content=f"msg {j}",
+                        created_at=_T0 + j,
+                    )
+                )
+                await asyncio.sleep(0.001)
+
+        async def _deleter(key: str) -> None:
+            await asyncio.sleep(0.005)
+            await storage.delete_session(key)
+
+        # Concurrently write to odd sessions and delete even sessions
+        writers = [_writer_loop(keys[i], f"stress-sess-{i}") for i in range(1, num_sessions, 2)]
+        deleters = [_deleter(keys[i]) for i in range(0, num_sessions, 2)]
+
+        await asyncio.gather(*writers, *deleters)
+
+        # Even sessions are deleted; odd sessions survived with all appended messages
+        for i in range(num_sessions):
+            key = keys[i]
+            sess_id = f"stress-sess-{i}"
+            if i % 2 == 0:
+                assert await storage.get_session(key) is None
+                assert await storage.get_transcript(sess_id) == []
+            else:
+                assert await storage.get_session(key) is not None
+                transcript = await storage.get_transcript(sess_id)
+                # Seed message + 5 appended messages = 6
+                assert len(transcript) == 6
+    finally:
+        await storage.close()

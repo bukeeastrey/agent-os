@@ -36,7 +36,7 @@ class _AsyncReentrantLock:
 
     async def acquire(self) -> None:
         current_task = asyncio.current_task()
-        if self._owner is current_task:
+        if self._owner is not None and self._owner is current_task:
             self._depth += 1
             return
         await self._lock.acquire()
@@ -662,19 +662,24 @@ class SessionStorage:
     async def transaction(self) -> AsyncIterator[Any]:
         """Serialize transaction ownership on the shared SQLite connection."""
         async with self._write_lock:
-            await self.conn.execute("BEGIN IMMEDIATE")
-            self._in_transaction = True
+            nested = self._in_transaction
+            if not nested:
+                await self.conn.execute("BEGIN IMMEDIATE")
+                self._in_transaction = True
             try:
                 yield self.conn
-                await self.conn.commit()
+                if not nested:
+                    await self.conn.commit()
             except BaseException:
-                try:
-                    await self.conn.rollback()
-                except Exception:
-                    pass
+                if not nested:
+                    try:
+                        await self.conn.rollback()
+                    except Exception:
+                        pass
                 raise
             finally:
-                self._in_transaction = False
+                if not nested:
+                    self._in_transaction = False
 
     @asynccontextmanager
     async def _write_context(self) -> AsyncIterator[Any]:
