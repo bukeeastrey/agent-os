@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
 
@@ -21,6 +24,39 @@ from agentos.session.models import (
 )
 
 log = logging.getLogger(__name__)
+
+
+class _AsyncReentrantLock:
+    """Async reentrant lock bound to asyncio.current_task()."""
+
+    def __init__(self) -> None:
+        self._lock = asyncio.Lock()
+        self._owner: asyncio.Task[Any] | None = None
+        self._depth = 0
+
+    async def acquire(self) -> None:
+        current_task = asyncio.current_task()
+        if self._owner is current_task:
+            self._depth += 1
+            return
+        await self._lock.acquire()
+        self._owner = current_task
+        self._depth = 1
+
+    def release(self) -> None:
+        current_task = asyncio.current_task()
+        if self._owner is not current_task:
+            raise RuntimeError("Cannot release un-owned lock")
+        self._depth -= 1
+        if self._depth == 0:
+            self._owner = None
+            self._lock.release()
+
+    async def __aenter__(self) -> None:
+        await self.acquire()
+
+    async def __aexit__(self, *args: Any) -> None:
+        self.release()
 
 
 class StaleEpochError(Exception):
@@ -109,15 +145,12 @@ CREATE TABLE IF NOT EXISTS projects (
 )
 """
 
-_CREATE_IDX_PROJECTS_AGENT = (
-    "CREATE INDEX IF NOT EXISTS idx_projects_agent ON projects(agent_id)"
-)
+_CREATE_IDX_PROJECTS_AGENT = "CREATE INDEX IF NOT EXISTS idx_projects_agent ON projects(agent_id)"
 
 # Backstop for the advisory Python-side name check (closes the concurrent
 # create race). NOCASE folds ASCII only; the casefold check stays primary.
 _CREATE_UNIQUE_IDX_PROJECTS_NAME = (
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_name_nocase "
-    "ON projects(name COLLATE NOCASE)"
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_name_nocase ON projects(name COLLATE NOCASE)"
 )
 
 _CREATE_IDX_SESSIONS_PROJECT = (
@@ -416,6 +449,8 @@ class SessionStorage:
     ) -> None:
         self._db_path = db_path
         self._conn: Any | None = None
+        self._write_lock = _AsyncReentrantLock()
+        self._in_transaction = False
 
     async def connect(self) -> None:
         self._conn = await aiosqlite.connect(self._db_path)
@@ -493,15 +528,11 @@ class SessionStorage:
             )
             await self._conn.commit()
         # Defensive: zero-out any NULL epoch rows left by a partial migration.
-        async with self._conn.execute(
-            "SELECT COUNT(*) FROM sessions WHERE epoch IS NULL"
-        ) as cur:
+        async with self._conn.execute("SELECT COUNT(*) FROM sessions WHERE epoch IS NULL") as cur:
             row = await cur.fetchone()
         null_count = row[0] if row else 0
         if null_count > 0:
-            await self._conn.execute(
-                "UPDATE sessions SET epoch = 0 WHERE epoch IS NULL"
-            )
+            await self._conn.execute("UPDATE sessions SET epoch = 0 WHERE epoch IS NULL")
             await self._conn.commit()
 
     async def _migrate_transcript_reasoning_content_column(self) -> None:
@@ -521,9 +552,7 @@ class SessionStorage:
         async with self._conn.execute("PRAGMA table_info(transcript_entries)") as cur:
             columns = [row[1] for row in await cur.fetchall()]
         if "turn_usage" not in columns:
-            await self._conn.execute(
-                "ALTER TABLE transcript_entries ADD COLUMN turn_usage TEXT"
-            )
+            await self._conn.execute("ALTER TABLE transcript_entries ADD COLUMN turn_usage TEXT")
             await self._conn.commit()
 
     async def _migrate_summary_metadata_columns(self) -> None:
@@ -556,8 +585,7 @@ class SessionStorage:
             "tokens_before": "ALTER TABLE session_summaries ADD COLUMN tokens_before INTEGER",
             "tokens_after": "ALTER TABLE session_summaries ADD COLUMN tokens_after INTEGER",
             "removed_count": (
-                "ALTER TABLE session_summaries ADD COLUMN "
-                "removed_count INTEGER NOT NULL DEFAULT 0"
+                "ALTER TABLE session_summaries ADD COLUMN removed_count INTEGER NOT NULL DEFAULT 0"
             ),
             "kept_count": (
                 "ALTER TABLE session_summaries ADD COLUMN kept_count INTEGER NOT NULL DEFAULT 0"
@@ -587,9 +615,7 @@ class SessionStorage:
             "coverage_turn_id": (
                 "ALTER TABLE memory_durable_receipts ADD COLUMN coverage_turn_id TEXT"
             ),
-            "coverage_hash": (
-                "ALTER TABLE memory_durable_receipts ADD COLUMN coverage_hash TEXT"
-            ),
+            "coverage_hash": ("ALTER TABLE memory_durable_receipts ADD COLUMN coverage_hash TEXT"),
             "coverage_entry_count": (
                 "ALTER TABLE memory_durable_receipts ADD COLUMN coverage_entry_count INTEGER"
             ),
@@ -632,6 +658,32 @@ class SessionStorage:
             raise RuntimeError("Storage not connected. Call connect() first.")
         return self._conn
 
+    @asynccontextmanager
+    async def transaction(self) -> AsyncIterator[Any]:
+        """Serialize transaction ownership on the shared SQLite connection."""
+        async with self._write_lock:
+            await self.conn.execute("BEGIN IMMEDIATE")
+            self._in_transaction = True
+            try:
+                yield self.conn
+                await self.conn.commit()
+            except BaseException:
+                try:
+                    await self.conn.rollback()
+                except Exception:
+                    pass
+                raise
+            finally:
+                self._in_transaction = False
+
+    @asynccontextmanager
+    async def _write_context(self) -> AsyncIterator[Any]:
+        """Serialize commit-producing writes against active transactions."""
+        async with self._write_lock:
+            yield self.conn
+            if not self._in_transaction:
+                await self.conn.commit()
+
     # ── Session CRUD ────────────────────────────────────────────────────────
 
     async def upsert_session(self, node: SessionNode) -> None:
@@ -655,8 +707,8 @@ class SessionStorage:
             f"INSERT INTO sessions ({', '.join(cols)}) VALUES ({placeholders}) "
             f"ON CONFLICT(session_key) DO UPDATE SET {updates}"
         )
-        await self.conn.execute(sql, values)
-        await self.conn.commit()
+        async with self._write_context():
+            await self.conn.execute(sql, values)
 
     async def get_session(self, session_key: str) -> SessionNode | None:
         session_key = canonicalize_session_key(session_key)
@@ -707,8 +759,7 @@ class SessionStorage:
         # in the next session that reuses the key. Delete every session-scoped
         # table in one transaction: no table declares a foreign key, so a partial
         # failure would otherwise orphan children under a deleted session.
-        await self.conn.execute("BEGIN IMMEDIATE")
-        try:
+        async with self.transaction():
             await self.conn.execute(
                 "DELETE FROM transcript_entries WHERE session_id = ?",
                 (session.session_id,),
@@ -734,10 +785,6 @@ class SessionStorage:
                 (session_key,),
             )
             await self.conn.execute("DELETE FROM sessions WHERE session_key = ?", (session_key,))
-            await self.conn.commit()
-        except Exception:
-            await self.conn.rollback()
-            raise
 
     async def prune_stale_sessions(self, before_ms: int) -> int:
         """Delete sessions not updated since before_ms epoch ms. Returns count deleted."""
@@ -762,11 +809,11 @@ class SessionStorage:
         Returns the new epoch value. Raises KeyError if the session is not found.
         """
         session_key = canonicalize_session_key(session_key)
-        await self.conn.execute(
-            "UPDATE sessions SET epoch = epoch + 1 WHERE session_key = ?",
-            (session_key,),
-        )
-        await self.conn.commit()
+        async with self._write_context():
+            await self.conn.execute(
+                "UPDATE sessions SET epoch = epoch + 1 WHERE session_key = ?",
+                (session_key,),
+            )
         async with self.conn.execute(
             "SELECT epoch FROM sessions WHERE session_key = ?", (session_key,)
         ) as cur:
@@ -797,8 +844,8 @@ class SessionStorage:
             f"INSERT INTO projects ({', '.join(cols)}) VALUES ({placeholders}) "
             f"ON CONFLICT(project_id) DO UPDATE SET {updates}"
         )
-        await self.conn.execute(sql, values)
-        await self.conn.commit()
+        async with self._write_context():
+            await self.conn.execute(sql, values)
 
     async def update_project_fields(
         self,
@@ -833,8 +880,8 @@ class SessionStorage:
         if expected_updated_at is not None:
             sql += " AND updated_at = ?"
             values.append(expected_updated_at)
-        cur = await self.conn.execute(sql, values)
-        await self.conn.commit()
+        async with self._write_context():
+            cur = await self.conn.execute(sql, values)
         return int(cur.rowcount or 0) > 0
 
     async def get_project(self, project_id: str) -> ProjectNode | None:
@@ -864,8 +911,7 @@ class SessionStorage:
         transaction: no foreign keys exist, so a partial failure would leave
         sessions pointing at a deleted project.
         """
-        await self.conn.execute("BEGIN IMMEDIATE")
-        try:
+        async with self.transaction():
             async with self.conn.execute(
                 "SELECT COUNT(*) FROM sessions WHERE project_id = ?", (project_id,)
             ) as cur:
@@ -875,14 +921,8 @@ class SessionStorage:
                 "UPDATE sessions SET project_id = NULL WHERE project_id = ?",
                 (project_id,),
             )
-            await self.conn.execute(
-                "DELETE FROM projects WHERE project_id = ?", (project_id,)
-            )
-            await self.conn.commit()
-        except Exception:
-            await self.conn.rollback()
-            raise
-        return detached
+            await self.conn.execute("DELETE FROM projects WHERE project_id = ?", (project_id,))
+            return detached
 
     async def count_sessions_in_project(self, project_id: str) -> int:
         async with self.conn.execute(
@@ -910,8 +950,8 @@ class SessionStorage:
         placeholders = ", ".join("?" for _ in cols)
         values = [_serialize(data[c]) for c in cols]
         sql = f"INSERT INTO agent_tasks ({', '.join(cols)}) VALUES ({placeholders})"
-        await self.conn.execute(sql, values)
-        await self.conn.commit()
+        async with self._write_context():
+            await self.conn.execute(sql, values)
         return task
 
     async def get_agent_task(self, task_id: str) -> AgentTaskRecord | None:
@@ -939,11 +979,11 @@ class SessionStorage:
         assignments = ", ".join(f"{name} = ?" for name in fields)
         values = [_serialize(value) for value in fields.values()]
         values.append(task_id)
-        await self.conn.execute(
-            f"UPDATE agent_tasks SET {assignments} WHERE task_id = ?",
-            values,
-        )
-        await self.conn.commit()
+        async with self._write_context():
+            await self.conn.execute(
+                f"UPDATE agent_tasks SET {assignments} WHERE task_id = ?",
+                values,
+            )
         updated = await self.get_agent_task(task_id)
         if updated is None:
             raise KeyError(f"Agent task not found: {task_id}")
@@ -967,8 +1007,7 @@ class SessionStorage:
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         params += [limit, offset]
         sql = (
-            f"SELECT * FROM agent_tasks {where} "
-            "ORDER BY created_at ASC, rowid ASC LIMIT ? OFFSET ?"
+            f"SELECT * FROM agent_tasks {where} ORDER BY created_at ASC, rowid ASC LIMIT ? OFFSET ?"
         )
         async with self.conn.execute(sql, params) as cur:
             rows = await cur.fetchall()
@@ -989,15 +1028,15 @@ class SessionStorage:
             if col not in {"receipt_id", "idempotency_key", "created_at"}
         )
         values = [_serialize(data[col]) for col in cols]
-        await self.conn.execute(
-            f"""
-            INSERT INTO memory_durable_receipts ({", ".join(cols)})
-            VALUES ({placeholders})
-            ON CONFLICT(idempotency_key) DO UPDATE SET {updates}
-            """,
-            values,
-        )
-        await self.conn.commit()
+        async with self._write_context():
+            await self.conn.execute(
+                f"""
+                INSERT INTO memory_durable_receipts ({", ".join(cols)})
+                VALUES ({placeholders})
+                ON CONFLICT(idempotency_key) DO UPDATE SET {updates}
+                """,
+                values,
+            )
         rows = await self.list_memory_durable_receipts(
             session_key=receipt.session_key,
             idempotency_key=receipt.idempotency_key,
@@ -1065,20 +1104,18 @@ class SessionStorage:
         allowed = set(MemoryDurableReceipt.model_fields) - {"receipt_id", "created_at"}
         unknown = sorted(set(fields) - allowed)
         if unknown:
-            raise ValueError(
-                f"Unknown memory durable receipt fields: {', '.join(unknown)}"
-            )
+            raise ValueError(f"Unknown memory durable receipt fields: {', '.join(unknown)}")
         if "session_key" in fields:
             fields["session_key"] = canonicalize_session_key(fields["session_key"])
         fields.setdefault("updated_at", _now_ms())
         assignments = ", ".join(f"{name} = ?" for name in fields)
         values = [_serialize(value) for value in fields.values()]
         values.append(receipt_id)
-        await self.conn.execute(
-            f"UPDATE memory_durable_receipts SET {assignments} WHERE receipt_id = ?",
-            values,
-        )
-        await self.conn.commit()
+        async with self._write_context():
+            await self.conn.execute(
+                f"UPDATE memory_durable_receipts SET {assignments} WHERE receipt_id = ?",
+                values,
+            )
         async with self.conn.execute(
             "SELECT * FROM memory_durable_receipts WHERE receipt_id = ?",
             (receipt_id,),
@@ -1118,25 +1155,25 @@ class SessionStorage:
     async def mark_abandoned_agent_tasks(self, now_ms: int | None = None) -> int:
         """Mark non-terminal persisted tasks as abandoned after process restart."""
         ts = now_ms or _now_ms()
-        cur = await self.conn.execute(
-            """
-            UPDATE agent_tasks
-            SET status = ?,
-                updated_at = ?,
-                finished_at = COALESCE(finished_at, ?),
-                terminal_reason = COALESCE(terminal_reason, ?)
-            WHERE status IN (?, ?)
-            """,
-            (
-                AgentTaskStatus.ABANDONED,
-                ts,
-                ts,
-                "process_restart",
-                AgentTaskStatus.QUEUED,
-                AgentTaskStatus.RUNNING,
-            ),
-        )
-        await self.conn.commit()
+        async with self._write_context():
+            cur = await self.conn.execute(
+                """
+                UPDATE agent_tasks
+                SET status = ?,
+                    updated_at = ?,
+                    finished_at = COALESCE(finished_at, ?),
+                    terminal_reason = COALESCE(terminal_reason, ?)
+                WHERE status IN (?, ?)
+                """,
+                (
+                    AgentTaskStatus.ABANDONED,
+                    ts,
+                    ts,
+                    "process_restart",
+                    AgentTaskStatus.QUEUED,
+                    AgentTaskStatus.RUNNING,
+                ),
+            )
         return int(cur.rowcount if cur.rowcount is not None else 0)
 
     # ── Transcript CRUD ──────────────────────────────────────────────────────
@@ -1165,27 +1202,27 @@ class SessionStorage:
                 f"  WHERE session_key = ? AND epoch = ?"
                 f")"
             )
-            async with self.conn.execute(
-                insert_sql, values + [entry.session_key, expected_epoch]
-            ) as cur:
-                inserted = cur.rowcount or 0
-            if inserted == 0:
-                # Fetch actual epoch for the error message (best-effort).
+            async with self._write_context():
                 async with self.conn.execute(
-                    "SELECT epoch FROM sessions WHERE session_key = ?",
-                    (entry.session_key,),
-                ) as cur2:
-                    row = await cur2.fetchone()
-                actual = int(row[0]) if row is not None else None
-                raise StaleEpochError(
-                    f"Epoch mismatch for {entry.session_key}: "
-                    f"expected {expected_epoch}, got {actual}"
-            )
-            await self.conn.commit()
+                    insert_sql, values + [entry.session_key, expected_epoch]
+                ) as cur:
+                    inserted = cur.rowcount or 0
+                if inserted == 0:
+                    # Fetch actual epoch for the error message (best-effort).
+                    async with self.conn.execute(
+                        "SELECT epoch FROM sessions WHERE session_key = ?",
+                        (entry.session_key,),
+                    ) as cur2:
+                        row = await cur2.fetchone()
+                    actual = int(row[0]) if row is not None else None
+                    raise StaleEpochError(
+                        f"Epoch mismatch for {entry.session_key}: "
+                        f"expected {expected_epoch}, got {actual}"
+                    )
         else:
             sql = f"INSERT INTO transcript_entries ({', '.join(cols)}) VALUES ({placeholders})"
-            await self.conn.execute(sql, values)
-            await self.conn.commit()
+            async with self._write_context():
+                await self.conn.execute(sql, values)
 
     async def get_transcript(
         self, session_id: str, limit: int | None = None, offset: int = 0
@@ -1257,9 +1294,7 @@ class SessionStorage:
             ORDER BY created_at ASC, id ASC
             LIMIT ? OFFSET ?
         """
-        async with self.conn.execute(
-            sql, (session_id, session_id, limit_val, offset)
-        ) as cur:
+        async with self.conn.execute(sql, (session_id, session_id, limit_val, offset)) as cur:
             rows = await cur.fetchall()
         return [TranscriptEntry(**_deserialize_row(dict(r))) for r in rows]
 
@@ -1271,60 +1306,60 @@ class SessionStorage:
         target_session_key: str,
     ) -> None:
         """Copy archived compacted transcript rows into a forked session."""
-        await self.conn.execute(
-            """
-            INSERT INTO compacted_transcript_entries (
-                session_id,
-                session_key,
-                compaction_id,
-                compaction_index,
-                original_entry_id,
-                message_id,
-                role,
-                content,
-                tool_calls,
-                tool_call_id,
-                reasoning_content,
-                turn_usage,
-                created_at,
-                token_count,
-                provenance_kind,
-                provenance_origin_session_id,
-                provenance_source_session_key,
-                provenance_source_channel,
-                provenance_source_tool,
-                archived_at,
-                schema_version
+        async with self._write_context():
+            await self.conn.execute(
+                """
+                INSERT INTO compacted_transcript_entries (
+                    session_id,
+                    session_key,
+                    compaction_id,
+                    compaction_index,
+                    original_entry_id,
+                    message_id,
+                    role,
+                    content,
+                    tool_calls,
+                    tool_call_id,
+                    reasoning_content,
+                    turn_usage,
+                    created_at,
+                    token_count,
+                    provenance_kind,
+                    provenance_origin_session_id,
+                    provenance_source_session_key,
+                    provenance_source_channel,
+                    provenance_source_tool,
+                    archived_at,
+                    schema_version
+                )
+                SELECT
+                    ?,
+                    ?,
+                    compaction_id,
+                    compaction_index,
+                    original_entry_id,
+                    message_id,
+                    role,
+                    content,
+                    tool_calls,
+                    tool_call_id,
+                    reasoning_content,
+                    turn_usage,
+                    created_at,
+                    token_count,
+                    provenance_kind,
+                    provenance_origin_session_id,
+                    provenance_source_session_key,
+                    provenance_source_channel,
+                    provenance_source_tool,
+                    archived_at,
+                    schema_version
+                FROM compacted_transcript_entries
+                WHERE session_id = ?
+                ORDER BY created_at ASC, original_entry_id ASC, id ASC
+                """,
+                (target_session_id, target_session_key, source_session_id),
             )
-            SELECT
-                ?,
-                ?,
-                compaction_id,
-                compaction_index,
-                original_entry_id,
-                message_id,
-                role,
-                content,
-                tool_calls,
-                tool_call_id,
-                reasoning_content,
-                turn_usage,
-                created_at,
-                token_count,
-                provenance_kind,
-                provenance_origin_session_id,
-                provenance_source_session_key,
-                provenance_source_channel,
-                provenance_source_tool,
-                archived_at,
-                schema_version
-            FROM compacted_transcript_entries
-            WHERE session_id = ?
-            ORDER BY created_at ASC, original_entry_id ASC, id ASC
-            """,
-            (target_session_id, target_session_key, source_session_id),
-        )
-        await self.conn.commit()
 
     async def count_transcript_entries(self, session_id: str) -> int:
         async with self.conn.execute(
@@ -1333,9 +1368,7 @@ class SessionStorage:
             row = await cur.fetchone()
         return row[0] if row else 0
 
-    async def count_transcript_entries_batch(
-        self, session_ids: list[str]
-    ) -> dict[str, int]:
+    async def count_transcript_entries_batch(self, session_ids: list[str]) -> dict[str, int]:
         """Count transcript entries for many sessions in one round trip.
 
         Used by ``sessions.list`` (rpc_sessions.py) to avoid the N+1 pattern
@@ -1367,14 +1400,14 @@ class SessionStorage:
         return result
 
     async def delete_transcript(self, session_id: str) -> None:
-        await self.conn.execute(
-            "DELETE FROM transcript_entries WHERE session_id = ?", (session_id,)
-        )
-        await self.conn.execute(
-            "DELETE FROM compacted_transcript_entries WHERE session_id = ?",
-            (session_id,),
-        )
-        await self.conn.commit()
+        async with self._write_context():
+            await self.conn.execute(
+                "DELETE FROM transcript_entries WHERE session_id = ?", (session_id,)
+            )
+            await self.conn.execute(
+                "DELETE FROM compacted_transcript_entries WHERE session_id = ?",
+                (session_id,),
+            )
 
     async def delete_transcript_entry(self, session_id: str, message_id: str) -> bool:
         """Delete a single transcript entry by ``message_id``.
@@ -1384,17 +1417,19 @@ class SessionStorage:
         queue is full), so the client can safely retry without leaving a
         ghost user turn behind.
         """
-        async with self.conn.execute(
-            "DELETE FROM transcript_entries WHERE session_id = ? AND message_id = ?",
-            (session_id, message_id),
-        ) as cur:
-            removed = cur.rowcount or 0
-        await self.conn.commit()
+        async with self._write_context():
+            async with self.conn.execute(
+                "DELETE FROM transcript_entries WHERE session_id = ? AND message_id = ?",
+                (session_id, message_id),
+            ) as cur:
+                removed = cur.rowcount or 0
         return removed > 0
 
     async def delete_summaries(self, session_id: str) -> None:
-        await self.conn.execute("DELETE FROM session_summaries WHERE session_id = ?", (session_id,))
-        await self.conn.commit()
+        async with self._write_context():
+            await self.conn.execute(
+                "DELETE FROM session_summaries WHERE session_id = ?", (session_id,)
+            )
 
     async def get_recent_transcript(self, session_id: str, n: int) -> list[TranscriptEntry]:
         """Return the most recent n entries, ordered oldest-first."""
@@ -1422,12 +1457,12 @@ class SessionStorage:
         cols = list(data.keys())
         placeholders = ", ".join("?" for _ in cols)
         values = [_serialize(data[c]) for c in cols]
-        async with self.conn.execute(
-            f"INSERT INTO session_summaries ({', '.join(cols)}) VALUES ({placeholders})",
-            values,
-        ) as cur:
-            summary.id = cur.lastrowid
-        await self.conn.commit()
+        async with self._write_context():
+            async with self.conn.execute(
+                f"INSERT INTO session_summaries ({', '.join(cols)}) VALUES ({placeholders})",
+                values,
+            ) as cur:
+                summary.id = cur.lastrowid
         return summary
 
     async def _archive_transcript_entries(
@@ -1476,8 +1511,7 @@ class SessionStorage:
         node.session_key = canonicalize_session_key(node.session_key)
         node.agent_id = normalize_agent_id(node.agent_id)
 
-        await self.conn.execute("BEGIN IMMEDIATE")
-        try:
+        async with self.transaction():
             if summary is not None:
                 summary.session_id = node.session_id
                 summary.session_key = node.session_key
@@ -1493,9 +1527,7 @@ class SessionStorage:
                 node=node,
                 entries=archived_entries or [],
                 compaction_id=summary.compaction_id if summary is not None else None,
-                compaction_index=summary.compaction_index
-                if summary is not None
-                else None,
+                compaction_index=summary.compaction_index if summary is not None else None,
             )
 
             await self.conn.execute(
@@ -1559,10 +1591,6 @@ class SessionStorage:
                 f"ON CONFLICT(session_key) DO UPDATE SET {', '.join(node_updates)}",
                 node_values,
             )
-            await self.conn.commit()
-        except Exception:
-            await self.conn.rollback()
-            raise
 
     async def get_latest_summary(self, session_id: str) -> SessionSummary | None:
         async with self.conn.execute(
@@ -1643,11 +1671,11 @@ class SessionStorage:
         summary_id: int,
         status: str,
     ) -> None:
-        await self.conn.execute(
-            "UPDATE session_summaries SET flush_receipt_status = ? WHERE id = ?",
-            (status, summary_id),
-        )
-        await self.conn.commit()
+        async with self._write_context():
+            await self.conn.execute(
+                "UPDATE session_summaries SET flush_receipt_status = ? WHERE id = ?",
+                (status, summary_id),
+            )
 
     async def update_summary_flush_receipt_status_by_compaction(
         self,
@@ -1656,35 +1684,32 @@ class SessionStorage:
         compaction_id: str,
         status: str,
     ) -> int:
-        cur = await self.conn.execute(
-            """
-            UPDATE session_summaries
-            SET flush_receipt_status = ?
-            WHERE session_key = ? AND compaction_id = ?
-            """,
-            (status, canonicalize_session_key(session_key), compaction_id),
-        )
-        await self.conn.commit()
+        async with self._write_context():
+            cur = await self.conn.execute(
+                """
+                UPDATE session_summaries
+                SET flush_receipt_status = ?
+                WHERE session_key = ? AND compaction_id = ?
+                """,
+                (status, canonicalize_session_key(session_key), compaction_id),
+            )
         return int(cur.rowcount or 0)
 
     # ── SessionContextState CRUD ─────────────────────────────────────────────
 
-    async def save_context_state(
-        self, state: SessionContextState
-    ) -> SessionContextState:
+    async def save_context_state(self, state: SessionContextState) -> SessionContextState:
         """Persist portable or provider-native context state for later replay."""
         state.session_key = canonicalize_session_key(state.session_key)
         data = state.model_dump(exclude={"id"})
         cols = list(data.keys())
         placeholders = ", ".join("?" for _ in cols)
         values = [_serialize(data[c]) for c in cols]
-        async with self.conn.execute(
-            "INSERT INTO session_context_states "
-            f"({', '.join(cols)}) VALUES ({placeholders})",
-            values,
-        ) as cur:
-            state.id = cur.lastrowid
-        await self.conn.commit()
+        async with self._write_context():
+            async with self.conn.execute(
+                f"INSERT INTO session_context_states ({', '.join(cols)}) VALUES ({placeholders})",
+                values,
+            ) as cur:
+                state.id = cur.lastrowid
         return state
 
     async def get_context_states(
@@ -1708,8 +1733,7 @@ class SessionStorage:
             clauses.append("valid = 1")
         where = " AND ".join(clauses)
         async with self.conn.execute(
-            "SELECT * FROM session_context_states "
-            f"WHERE {where} ORDER BY created_at ASC, id ASC",
+            f"SELECT * FROM session_context_states WHERE {where} ORDER BY created_at ASC, id ASC",
             params,
         ) as cur:
             rows = await cur.fetchall()
@@ -1732,14 +1756,14 @@ class SessionStorage:
         if state_kind is not None:
             clauses.append("state_kind = ?")
             params.append(state_kind)
-        async with self.conn.execute(
-            "UPDATE session_context_states "
-            "SET valid = 0, invalid_reason = ? "
-            f"WHERE {' AND '.join(clauses)}",
-            [reason, *params],
-        ) as cur:
-            changed = cur.rowcount or 0
-        await self.conn.commit()
+        async with self._write_context():
+            async with self.conn.execute(
+                "UPDATE session_context_states "
+                "SET valid = 0, invalid_reason = ? "
+                f"WHERE {' AND '.join(clauses)}",
+                [reason, *params],
+            ) as cur:
+                changed = cur.rowcount or 0
         return int(changed)
 
     # ── FTS5 Search ──────────────────────────────────────────────────────
