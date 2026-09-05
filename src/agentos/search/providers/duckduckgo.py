@@ -29,12 +29,12 @@ def _clean_ddg_url(href: str) -> str:
             qs = urllib.parse.parse_qs(parsed.query)
             if "uddg" in qs and qs["uddg"]:
                 return qs["uddg"][0]
-        except Exception:
+        except (ValueError, KeyError):
             pass
         try:
             part = href.split("uddg=")[1].split("&")[0]
             return urllib.parse.unquote(part)
-        except Exception:
+        except (ValueError, KeyError, IndexError):
             pass
     return href
 
@@ -67,18 +67,35 @@ class DuckDuckGoProvider:
                     headers=_HEADERS,
                 )
                 response.raise_for_status()
+        except httpx.TimeoutException as exc:
+            raise SearchProviderError(
+                provider=self.name,
+                kind="timeout",
+                message=str(exc) or "DuckDuckGo search request timed out.",
+                retryable=True,
+            ) from exc
+        except httpx.HTTPStatusError as exc:
+            status_code = exc.response.status_code
+            if status_code in {401, 403}:
+                kind: SearchErrorKind = "auth"
+            elif status_code == 429:
+                kind = "rate_limit"
+            else:
+                kind = "http"
+            raise SearchProviderError(
+                provider=self.name,
+                kind=kind,
+                message=str(exc) or f"DuckDuckGo search failed with HTTP {status_code}.",
+                retryable=kind in {"rate_limit", "http"},
+                status_code=status_code,
+            ) from exc
         except httpx.HTTPError as exc:
-            if self._diagnostics:
-                kind: SearchErrorKind = (
-                    "timeout" if isinstance(exc, httpx.TimeoutException) else "network"
-                )
-                raise SearchProviderError(
-                    provider=self.name,
-                    kind=kind,
-                    message=str(exc) or "DuckDuckGo search network request failed.",
-                    retryable=True,
-                ) from exc
-            return []
+            raise SearchProviderError(
+                provider=self.name,
+                kind="network",
+                message=str(exc) or "DuckDuckGo search network request failed.",
+                retryable=True,
+            ) from exc
 
         soup = BeautifulSoup(response.text, "html.parser")
         results: list[SearchResult] = []
