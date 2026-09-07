@@ -34,6 +34,9 @@ _SENSITIVE_PREFIXES: tuple[str, ...] = (
     "~/.aws",
     "~/.azure",
     "~/.config/gcloud",
+    "~/.config/gh",
+    "~/.anthropic",
+    "~/.openai",
     "~/.docker/config",
     "~/.kube",
     "~/.npmrc",
@@ -41,6 +44,9 @@ _SENSITIVE_PREFIXES: tuple[str, ...] = (
     "~/.netrc",
     "~/.gnupg",
     "~/.password-store",
+    # Single file in home root; paired with /.vault-token in _SENSITIVE_SUFFIXES
+    # to catch Vault tokens stored in non-home directory locations.
+    "~/.vault-token",
     "/etc",
     "/boot",
     "/sys",
@@ -70,6 +76,8 @@ _SENSITIVE_SUFFIXES: tuple[str, ...] = (
     "/.zsh_history",
     "/.mysql_history",
     "/.psql_history",
+    # Catches Vault CLI token files located outside home (e.g. /var/secrets/.vault-token).
+    "/.vault-token",
 )
 
 _WORKSPACE_PARENT_EXCEPTION_MARKERS: tuple[str, ...] = ("/root",)

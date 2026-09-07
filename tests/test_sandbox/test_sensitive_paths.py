@@ -14,6 +14,29 @@ from agentos.sandbox.sensitive_paths import (
 def test_sensitive_path_matches_nested_home_prefixes_with_native_separators() -> None:
     assert is_sensitive_path(str(Path.home() / ".ssh" / "id_rsa")) == "~/.ssh"
     assert is_sensitive_path(str(Path.home() / ".aws" / "credentials")) == "~/.aws"
+    assert is_sensitive_path(str(Path.home() / ".config" / "gh" / "hosts.yml")) == "~/.config/gh"
+    assert is_sensitive_path(str(Path.home() / ".anthropic" / "token")) == "~/.anthropic"
+    assert is_sensitive_path(str(Path.home() / ".openai" / "api_key")) == "~/.openai"
+    assert is_sensitive_path(str(Path.home() / ".vault-token")) == "~/.vault-token"
+
+
+def test_sensitive_path_suffix_matches_vault_token() -> None:
+    assert is_sensitive_path("/var/secrets/.vault-token") == "/.vault-token"
+    assert is_sensitive_path(r"C:\secrets\.vault-token") == "/.vault-token"
+
+
+def test_sensitive_path_negative_cases_allow_benign_config_and_unrelated_files() -> None:
+    """Ensure segment boundaries prevent broad false positives under ~/.config and non-secrets."""
+    # Benign ~/.config subdirectories must not be blocked by ~/.config/gh or ~/.config/gcloud
+    assert is_sensitive_path(str(Path.home() / ".config")) is None
+    assert is_sensitive_path(str(Path.home() / ".config" / "nvim" / "init.lua")) is None
+    assert is_sensitive_path(str(Path.home() / ".config" / "git" / "config")) is None
+    assert is_sensitive_path(str(Path.home() / ".config" / "ghostty" / "config")) is None
+
+    # Files named vault-token without leading dot must not match the .vault-token sensitive pattern
+    assert is_sensitive_path(str(Path.home() / "vault-token")) is None
+    assert is_sensitive_path("/var/secrets/vault-token") is None
+    assert is_sensitive_path(r"C:\workspace\vault-token.txt") is None
 
 
 def test_sensitive_path_in_text_matches_native_separator_paths() -> None:
