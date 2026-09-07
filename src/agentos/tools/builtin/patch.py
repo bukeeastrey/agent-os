@@ -451,9 +451,16 @@ def _gate_patch_ops(
 
 
 def _detect_newline(lines: list[str]) -> str:
+    """Detect predominant newline convention from lines (\r\n vs \n). Defaults to \n."""
+    crlf_count = 0
+    lf_count = 0
     for line in lines:
         if line.endswith("\r\n"):
-            return "\r\n"
+            crlf_count += 1
+        elif line.endswith("\n"):
+            lf_count += 1
+    if crlf_count > lf_count:
+        return "\r\n"
     return "\n"
 
 
