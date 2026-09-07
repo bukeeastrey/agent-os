@@ -107,6 +107,64 @@ def build_compaction_config_from_provider(
     return cfg
 
 
+def effective_compaction_model(session: Any | None) -> str | None:
+    """Return the effective model configured on a session object."""
+    if session is None:
+        return None
+    return getattr(session, "model_override", None) or getattr(session, "model", None)
+
+
+def resolve_compaction_provider(
+    ctx_or_selector: Any = None,
+    session: Any | None = None,
+    *,
+    model_override: str | None = None,
+) -> Any | None:
+    """Resolve the LLM provider for compaction.
+
+    Supports both:
+    1. RPC contexts with attached session objects:
+       ``resolve_compaction_provider(ctx, session)``
+    2. Direct provider selector instances with optional model overrides:
+       ``resolve_compaction_provider(provider_selector, model_override=model)``
+    """
+    if ctx_or_selector is None:
+        return None
+
+    selector = getattr(ctx_or_selector, "provider_selector", ctx_or_selector)
+    if selector is None:
+        return None
+
+    resolved_selector = selector
+    clone = getattr(selector, "clone", None)
+    if callable(clone):
+        try:
+            resolved_selector = clone()
+        except Exception:  # noqa: BLE001
+            resolved_selector = selector
+
+    model = model_override or effective_compaction_model(session)
+    if model and resolved_selector is not selector:
+        override = getattr(resolved_selector, "override_model", None)
+        if callable(override):
+            try:
+                override(model)
+            except Exception:  # noqa: BLE001
+                pass
+
+    resolver = getattr(resolved_selector, "resolve", None)
+    if not callable(resolver):
+        return None
+    try:
+        return cast(object | None, resolver())
+    except Exception:  # noqa: BLE001
+        return None
+
+
+_effective_compaction_model = effective_compaction_model
+_resolve_compaction_provider = resolve_compaction_provider
+
+
 def compact_accepts_config(compact_fn: Any) -> bool:
     """Return whether a compact callable can accept the optional config arg."""
 
