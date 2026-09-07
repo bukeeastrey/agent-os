@@ -32,10 +32,12 @@ class ProviderRecoveryAction(StrEnum):
 
 
 _OPENAI_COMPAT_PROVIDERS = {
+    "bankr",
     "opencap",
     "surplus",
     "openrouter",
     "openai",
+    "openai_responses",
     "azure",
     "deepseek",
     "gemini",
@@ -50,10 +52,14 @@ _OPENAI_COMPAT_PROVIDERS = {
     "aihubmix",
     "minimax_openai",
     "volcengine",
+    "volcengine_coding_plan",
     "byteplus",
+    "byteplus_coding_plan",
     "vllm",
     "lm_studio",
     "ovms",
+    "openai_codex",
+    "github_copilot",
 }
 
 _GATEWAY_TRANSIENT_STATUS_CODES = {499, 500, 502, 503, 504, 520, 521, 522, 523, 524, 529}

@@ -9,6 +9,8 @@ from agentos.provider.failures import ProviderFailureKind, classify_provider_err
 @pytest.mark.parametrize(
     "provider",
     [
+        "bankr",
+        "openai_responses",
         "deepseek",
         "gemini",
         "dashscope",
@@ -19,7 +21,9 @@ from agentos.provider.failures import ProviderFailureKind, classify_provider_err
         "zhipu",
         "siliconflow",
         "volcengine",
+        "volcengine_coding_plan",
         "byteplus",
+        "byteplus_coding_plan",
         "qianfan",
         "aihubmix",
         "minimax_openai",
@@ -53,6 +57,29 @@ def test_minimax_region_profiles_use_anthropic_failure_classification(provider: 
         classify_provider_error(provider, 401, raw_code="authentication_error")
         is ProviderFailureKind.AUTH_INVALID
     )
+
+
+def test_all_registry_openai_compatible_providers_present_in_compat_set() -> None:
+    """Structural invariant: every provider registered with OpenAI-compat semantics
+
+    must be present in _OPENAI_COMPAT_PROVIDERS so its failure classification
+    does not accidentally fall through to ProviderFailureKind.UNKNOWN.
+    """
+    from agentos.provider.failures import _OPENAI_COMPAT_PROVIDERS
+    from agentos.provider.registry import list_provider_specs
+
+    registry_openai_compat = {
+        spec.provider_id
+        for spec in list_provider_specs()
+        if spec.failure_family == "openai_compat"
+        or spec.backend in ("openai_compat", "openai_responses")
+    }
+
+    missing = registry_openai_compat - _OPENAI_COMPAT_PROVIDERS
+    assert not missing, (
+        f"Registered OpenAI-compatible providers missing from _OPENAI_COMPAT_PROVIDERS: {missing}"
+    )
+
 
 
 @pytest.mark.parametrize(
