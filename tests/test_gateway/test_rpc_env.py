@@ -145,6 +145,7 @@ class TestSet:
 
     @pytest.mark.asyncio
     async def test_requires_name_and_value(self) -> None:
+        assert (await call("env.set", None)).error is not None
         assert (await call("env.set", {"value": "x"})).error is not None
         assert (await call("env.set", {"name": "K"})).error is not None
         assert (await call("env.set", {"name": "K", "value": 5})).error is not None
@@ -332,6 +333,7 @@ class TestImport:
 
     @pytest.mark.asyncio
     async def test_requires_a_source(self) -> None:
+        assert (await call("env.import", None)).error is not None
         res = await call("env.import", {"name": "GITHUB_TOKEN"})
         assert res.error is not None
 
