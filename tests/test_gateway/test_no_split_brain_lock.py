@@ -61,13 +61,13 @@ def _make_storage() -> Any:
 
 
 # ---------------------------------------------------------------------------
-# AC-C3-1: _session_locks never popped in _mark_terminal
+# AC-C3-1: _session_locks and _session_execution_locks evicted when no tasks queued
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_session_locks_never_popped_at_terminal() -> None:
-    """After a task reaches terminal state, _session_locks still contains the key."""
+async def test_session_locks_popped_when_no_queued_tasks() -> None:
+    """After a task reaches terminal state and no tasks remain queued, locks are pruned."""
 
     async def _instant(_run: Any) -> None:
         pass
@@ -81,10 +81,9 @@ async def test_session_locks_never_popped_at_terminal() -> None:
     handle = await rt.enqueue(env, "msg")
     await rt.wait(handle.task_id, timeout=5.0)
 
-    # Lock must still be present — C3 fix ensures we never pop it.
-    assert env.session_key in rt._session_locks, (
-        "_session_locks should retain the entry after terminal (C3 fix)"
-    )
+    # Locks must be cleaned up when no tasks remain queued for this session.
+    assert env.session_key not in rt._session_locks
+    assert env.session_key not in rt._session_execution_locks
 
 
 # ---------------------------------------------------------------------------

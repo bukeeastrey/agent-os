@@ -91,11 +91,7 @@ def _make_runtime(
 
 @pytest.mark.asyncio
 async def test_terminal_clears_all_dicts() -> None:
-    """After a task succeeds, tracking dicts (except _session_locks) must not contain its key.
-
-    ``_session_locks`` is intentionally NOT cleaned at terminal to prevent
-    split-brain under concurrent enqueue. All other dicts are cleaned.
-    """
+    """After a task succeeds, tracking dicts must not contain its key."""
     rt = _make_runtime()
     env = _make_envelope("agent-1::sess-a")
     handle = await rt.enqueue(env, "hello")
@@ -105,8 +101,8 @@ async def test_terminal_clears_all_dicts() -> None:
     assert handle.task_id not in rt._tasks
     assert sk not in rt._running_by_session
     assert sk not in rt._pending_by_session
-    # _session_locks is intentionally retained: never pop while _execute may
-    # still hold the lock; prevents split-brain on rapid re-enqueue.
+    assert sk not in rt._session_locks
+    assert sk not in rt._session_execution_locks
     assert sk not in rt._last_envelope_by_session
 
 
@@ -138,7 +134,8 @@ async def test_cancel_clears_dicts() -> None:
     assert handle.task_id not in rt._tasks
     assert sk not in rt._running_by_session
     assert sk not in rt._pending_by_session
-    # _session_locks is intentionally retained.
+    assert sk not in rt._session_locks
+    assert sk not in rt._session_execution_locks
     assert sk not in rt._last_envelope_by_session
 
 
@@ -181,8 +178,9 @@ async def test_session_lock_kept_during_pending() -> None:
     # Wait for second task to finish.
     await rt.wait(handle2.task_id, timeout=2.0)
 
-    # _session_locks is intentionally retained after all tasks complete;
-    # do not assert its absence here.
+    # Session locks are cleaned up after all tasks complete.
+    assert sk not in rt._session_locks
+    assert sk not in rt._session_execution_locks
 
 
 @pytest.mark.asyncio
@@ -281,14 +279,7 @@ async def test_terminal_keeps_route_envelope_while_same_session_has_work() -> No
 
 @pytest.mark.asyncio
 async def test_exception_path_clears_dicts() -> None:
-    """Even when the turn handler raises, cleanup must run for 4 tracking dicts.
-
-    ``_session_locks`` is intentionally NOT cleared on terminal: retaining
-    the lock prevents split-brain when a new enqueue races with _execute's
-    post-terminal cleanup. All other 4 dicts (``_tasks``,
-    ``_running_by_session``, ``_pending_by_session``,
-    ``_last_envelope_by_session``) must be cleaned up.
-    """
+    """Even when the turn handler raises, cleanup must run for tracking dicts."""
 
     async def _failing_handler(_run: Any) -> None:
         raise RuntimeError("deliberate failure")
@@ -301,9 +292,9 @@ async def test_exception_path_clears_dicts() -> None:
     sk = env.session_key
     assert handle.task_id not in rt._tasks
     assert sk not in rt._running_by_session
-    # _session_locks is intentionally retained after terminal: prevents
-    # split-brain on rapid re-enqueue; lock is cheap and bounded per session_key.
     assert sk not in rt._pending_by_session
+    assert sk not in rt._session_locks
+    assert sk not in rt._session_execution_locks
     assert sk not in rt._last_envelope_by_session
 
 
@@ -356,6 +347,7 @@ async def test_no_leak_under_load(monkeypatch: pytest.MonkeyPatch) -> None:
 
     after_tasks = len(rt._tasks)
     after_locks = len(rt._session_locks)
+    after_exec_locks = len(rt._session_execution_locks)
     after_pending = len(rt._pending_by_session)
     after_running = len(rt._running_by_session)
     after_envelope = len(rt._last_envelope_by_session)
@@ -364,12 +356,11 @@ async def test_no_leak_under_load(monkeypatch: pytest.MonkeyPatch) -> None:
     assert abs(after_tasks - baseline_tasks) <= tolerance, (
         f"_tasks leaked: baseline={baseline_tasks}, after={after_tasks}"
     )
-    # _session_locks is intentionally NOT cleaned at terminal to prevent
-    # split-brain on rapid re-enqueue.  The dict grows by # unique session_keys
-    # (capped at session_count=50 here), not by # tasks.  We verify it is bounded
-    # by session_count rather than by num_tasks.
-    assert after_locks <= session_count + tolerance, (
-        f"_session_locks grew beyond unique session count: {after_locks} > {session_count}"
+    assert abs(after_locks - baseline_tasks) <= tolerance, (
+        f"_session_locks leaked: baseline={baseline_tasks}, after={after_locks}"
+    )
+    assert abs(after_exec_locks - baseline_tasks) <= tolerance, (
+        f"_session_execution_locks leaked: baseline={baseline_tasks}, after={after_exec_locks}"
     )
     assert abs(after_pending - baseline_pending) <= tolerance, (
         f"_pending_by_session leaked: baseline={baseline_pending}, after={after_pending}"

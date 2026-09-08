@@ -910,6 +910,10 @@ class TaskRuntime:
                 error_class=str(getattr(exc, "code", None) or type(exc).__name__),
                 error_message=str(exc),
             )
+        finally:
+            if not self._queue_depth_for_session(session_key):
+                self._session_locks.pop(session_key, None)
+                self._session_execution_locks.pop(session_key, None)
 
     async def _run_turn_handler_with_write_lock_bypass(
         self,
@@ -1277,6 +1281,12 @@ class TaskRuntime:
             "agentos_queue_depth",
             value=_total_queue_depth,
             session_key=task.envelope.session_key,
+        )
+
+    def _queue_depth_for_session(self, session_key: str) -> int:
+        """Return the count of pending and running tasks for *session_key*."""
+        return len(self._pending_by_session.get(session_key, [])) + (
+            1 if session_key in self._running_by_session else 0
         )
 
     async def _emit(self, session_key: str, event_name: str, payload: dict[str, Any]) -> None:
