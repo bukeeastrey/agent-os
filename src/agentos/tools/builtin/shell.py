@@ -650,13 +650,11 @@ async def _terminate_bg_session(session: _BgSession) -> None:
 
 
 async def _wait_exec_process(proc: Any, timeout: float) -> bool:
-    deadline = asyncio.get_running_loop().time() + max(0.0, timeout)
-    while proc.returncode is None:
-        remaining = deadline - asyncio.get_running_loop().time()
-        if remaining <= 0:
-            return proc.returncode is not None
-        await asyncio.sleep(min(0.01, remaining))
-    return True
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=max(0.0, timeout))
+        return True
+    except TimeoutError:
+        return False
 
 
 def _signal_exec_process_tree(proc: Any, sig: signal.Signals) -> bool:

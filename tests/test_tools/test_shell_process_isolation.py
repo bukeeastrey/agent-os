@@ -312,3 +312,24 @@ async def test_process_subagent_context_has_no_global_bypass() -> None:
         current_tool_context.reset(token)
 
     assert [session["session_id"] for session in payload["sessions"]] == ["own"]
+
+
+@pytest.mark.asyncio
+async def test_wait_exec_process_success_and_timeout() -> None:
+    class _MockProcess:
+        def __init__(self, delay: float = 0.0) -> None:
+            self._delay = delay
+
+        async def wait(self) -> int:
+            if self._delay > 0:
+                await asyncio.sleep(self._delay)
+            return 0
+
+    # Fast process returns True
+    fast_proc = _MockProcess(delay=0.01)
+    assert await shell._wait_exec_process(fast_proc, timeout=1.0) is True
+
+    # Slow process exceeding timeout returns False
+    slow_proc = _MockProcess(delay=1.0)
+    assert await shell._wait_exec_process(slow_proc, timeout=0.05) is False
+
