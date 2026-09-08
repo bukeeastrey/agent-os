@@ -35,14 +35,17 @@ _DESTRUCTIVE_PY_PATTERNS: list[tuple[str, str]] = [
     (r"\bshutil\.rmtree\s*\(", "shutil.rmtree()"),
     (r"\.unlink\s*\(", "Path.unlink()"),
     (r"\.rmdir\s*\(", "Path.rmdir()"),
-    (r"\bos\.system\s*\([^)]*\brm\b", "os.system with rm"),
     (
-        r"\bsubprocess\.(run|call|Popen|check_output|check_call)[^\n;]{0,200}\brm\b",
-        "subprocess invoking rm",
+        r"(?i)\bos\.system\s*\([^)]*\b(?:rm|rmdir|del|erase|rd|Remove-Item)\b",
+        "os.system with delete command",
     ),
     (
-        r"\bsubprocess\.(run|call|Popen|check_output|check_call)[^\n;]{0,200}\brmdir\b",
-        "subprocess invoking rmdir",
+        r"(?i)\bos\.popen\s*\([^)]*\b(?:rm|rmdir|del|erase|rd|Remove-Item)\b",
+        "os.popen with delete command",
+    ),
+    (
+        r"(?i)\bsubprocess\.(?:run|call|Popen|check_output|check_call)[^\n;]{0,200}\b(?:rm|rmdir|del|erase|rd|Remove-Item)\b",
+        "subprocess invoking delete command",
     ),
 ]
 
@@ -54,6 +57,10 @@ _ALL_DESTRUCTIVE_NAMES: frozenset[str] = frozenset(
 )
 _SUBPROCESS_CALL_NAMES: frozenset[str] = frozenset(
     {"run", "call", "Popen", "check_output", "check_call"}
+)
+_SHELL_DELETE_CMDS: frozenset[str] = frozenset({"rm", "rmdir", "del", "erase", "rd", "remove-item"})
+_SHELL_DELETE_RE: re.Pattern[str] = re.compile(
+    r"\b(rm|rmdir|del|erase|rd|Remove-Item)\b", re.IGNORECASE
 )
 
 
@@ -211,24 +218,30 @@ class _DestructiveCodeVisitor(ast.NodeVisitor):
 
             if mod == "os" and attr_name in ("system", "popen") and node.args:
                 cmd_str = _eval_const_str(node.args[0])
-                if cmd_str and re.search(r"\b(rm|rmdir)\b", cmd_str):
-                    self.warning = f"destructive Python operation detected: os.{attr_name} with rm"
+                if cmd_str and _SHELL_DELETE_RE.search(cmd_str):
+                    self.warning = (
+                        f"destructive Python operation detected: os.{attr_name} with delete command"
+                    )
                     return
 
             if mod == "subprocess" and attr_name in _SUBPROCESS_CALL_NAMES and node.args:
                 first_arg = node.args[0]
                 if isinstance(first_arg, ast.List):
                     parts = [_eval_const_str(elt) for elt in first_arg.elts]
-                    if any(p in ("rm", "rmdir") for p in parts if p is not None):
+                    if any(
+                        p and p.lower() in _SHELL_DELETE_CMDS for p in parts if p is not None
+                    ):
                         self.warning = (
-                            "destructive Python operation detected: subprocess invoking rm"
+                            "destructive Python operation detected: "
+                            "subprocess invoking delete command"
                         )
                         return
                 else:
                     cmd_str = _eval_const_str(first_arg)
-                    if cmd_str and re.search(r"\b(rm|rmdir)\b", cmd_str):
+                    if cmd_str and _SHELL_DELETE_RE.search(cmd_str):
                         self.warning = (
-                            "destructive Python operation detected: subprocess invoking rm"
+                            "destructive Python operation detected: "
+                            "subprocess invoking delete command"
                         )
                         return
 

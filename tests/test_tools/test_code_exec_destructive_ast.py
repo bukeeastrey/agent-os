@@ -46,8 +46,27 @@ from agentos.tools.builtin.code_exec import _check_code_destructive
         ('from pathlib import Path; getattr(Path("/tmp/x"), "unlink")()', "unlink"),
         ('from pathlib import Path; getattr(Path("/tmp/x"), "rmdir")()', "rmdir"),
         # Subprocess list invocation of rm
-        ('import subprocess; subprocess.run(["rm", "-rf", "/tmp/x"])', "subprocess invoking rm"),
-        ('import subprocess as sp; sp.call(["rmdir", "/tmp/x"])', "subprocess invoking rm"),
+        ('import subprocess; subprocess.run(["rm", "-rf", "/tmp/x"])', "subprocess"),
+        ('import subprocess as sp; sp.call(["rmdir", "/tmp/x"])', "subprocess"),
+        # Windows deletion commands in subprocess and os.system
+        ('import subprocess; subprocess.run(["cmd.exe", "/c", "del", "C:\\tmp\\x"])', "subprocess"),
+        (
+            'import subprocess; subprocess.run(["cmd.exe", "/c", "erase", "C:\\tmp\\x"])',
+            "subprocess",
+        ),
+        (
+            'import subprocess; subprocess.run(["cmd.exe", "/c", "rd", "/s", "C:\\tmp\\x"])',
+            "subprocess",
+        ),
+        (
+            'import subprocess; subprocess.run(["powershell", "-c", "Remove-Item", "C:\\tmp\\x"])',
+            "subprocess",
+        ),
+        ('import os; os.system("del C:\\tmp\\x")', "os.system"),
+        ('import os; os.system("erase C:\\tmp\\x")', "os.system"),
+        ('import os; os.system("rd /s /q C:\\tmp\\x")', "os.system"),
+        ('import os; os.system("powershell Remove-Item C:\\tmp\\x")', "os.system"),
+        ('import os; os.popen("del C:\\tmp\\x")', "os.popen"),
     ],
 )
 def test_destructive_ast_evasions_detected(code: str, expected_keyword: str) -> None:
