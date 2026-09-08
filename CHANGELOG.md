@@ -6,6 +6,253 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.9.7] - 2026-09-07
+
+### Fixed
+
+- Telegram polling retries failed callbacks before acknowledging their updates,
+  with at most three handling attempts per update. Exhausted updates are logged
+  at error level and skipped so later messages can proceed; repeated callback
+  IDs are deduplicated before approval handling.
+  ([#1027](https://github.com/use-agent-os/agent-os/issues/1027))
+
+- Day-of-week ranges that end at `SUN` parse again. `_parse_field` substituted
+  every day name with a single number, and `sun` is always 0 there, so
+  `SAT-SUN` reached the range check as `6-0` and `MON-SUN` as `1-0` — reversed
+  ranges, rejected with `CronParseError: Range start > end in field
+  'day_of_week'`. POSIX cron spells Sunday both 0 and 7 and reads the trailing
+  one as 7, which the parser already honoured for the numeric spelling: `WED-7`
+  worked while the `WED-SUN` a user would actually type did not. Names are now
+  substituted per token instead of by whole-string replace, so a `SUN` at the
+  upper bound of a range resolves to 7 unless the range already starts at
+  Sunday — `SAT-SUN` is `{0, 6}`, `MON-SUN` the whole week, and `SUN-WED` /
+  `SUN-SUN` keep the days they name
+  ([#1063](https://github.com/use-agent-os/agent-os/issues/1063)).
+- A JSON-RPC error whose `error` member is not an object no longer kills the
+  command with an `AttributeError`. `RpcError.__init__` in
+  `senior-unilp-manager` and `poolsdotfun-token-launcher` read the payload as
+  a dict unconditionally — `error.get("message", error)`. The spec says
+  `error` is an object, but nodes and proxies really do answer with a bare
+  string (`{"error": "rate limit exceeded"}`) or null, and each of those
+  raised `AttributeError: 'str' object has no attribute 'get'` *inside the
+  exception constructor*, so the traceback escaped every `except RpcError`
+  that `plan.py`, `pools_write.py` and `rpc.batch()` already have. `batch()`
+  was the worst case: a per-call error is meant to land in its own result slot
+  so one bad pool cannot abort a 40-pool sweep, and a string payload aborted
+  it anyway. The constructor now reads `code`/`data` only when the payload is
+  a mapping and falls back to the payload itself for the message, matching
+  what `robinhood-chain-stocks` already does; `raw` still carries whatever
+  came back and the dict path is unchanged
+  ([#974](https://github.com/use-agent-os/agent-os/issues/974)).
+- Bundled skill scripts refuse endpoints that are not `http(s)`. Every one of
+  them reaches `urllib.request.urlopen`, which speaks `file:`, `ftp:` and
+  `data:` just as happily as HTTP, so an endpoint taken from argv or the
+  environment was an arbitrary local-file read: `watch_http_json.py --url
+  file:///etc/passwd` reported the file's contents on every cron tick, and
+  `--rpc file://…` did the same through the `poolsdotfun-token-launcher` and
+  `senior-unilp-manager` JSON-RPC clients. The `senior-unilp-manager` client
+  was doubly exposed — it took `rpc_url or resolve_rpc_url(chain)`, so an
+  override skipped the resolver and every check in it. Each entry point now
+  validates the scheme and host with `urlsplit` before the URL reaches
+  `urlopen`, matching the guard `robinhood-chain-stocks` already carries, and
+  the watcher tests serve their fixtures over loopback HTTP instead of
+  `file://` ([#1065](https://github.com/use-agent-os/agent-os/issues/1065)).
+- A DuckDuckGo outage now reads as an outage instead of a quiet zero-result
+  search. `DuckDuckGoProvider.search()` swallowed every `httpx.HTTPError` and
+  returned `[]` unless it was built with `diagnostics=True`, so a 403, a 429 or
+  a timeout was indistinguishable from "nothing matched" — and nothing set that
+  flag: `_search_provider_kwargs()` in `tools/builtin/web.py` singled
+  DuckDuckGo out to receive `diagnostics=_active_search_diagnostics`, which is
+  `False` on a default gateway, so the constructor default was overridden to
+  off at the one call site that mattered. Both layers move: the provider
+  defaults to reporting and classifies the failure the way its Brave and Tavily
+  siblings already do (401/403 `auth`, 429 `rate_limit`, other statuses `http`,
+  plus `timeout` and `network`, each carrying `status_code` and `retryable`),
+  and the tool boundary only ever turns diagnostics *on*. `diagnostics=False`
+  stays as an explicit opt-out for a caller that depends on `search()` never
+  raising; `run_web_search_payload` already routes anything raised into its
+  `ok: false` envelope, so the tool contract is unchanged
+  ([#1122](https://github.com/use-agent-os/agent-os/issues/1122)).
+- The sensitive-path denylist now expands `$VAR`/`${VAR}` before it decides,
+  so the hard block cannot be side-stepped by spelling a home directory as a
+  variable. Tool dispatch ends in a shell, so `cat $HOME/.ssh/config` reaches
+  the syscall as `~/.ssh/config` while the scanner only ever saw the literal
+  text — a display-vs-executor drift that gave all 19 entries in
+  `_SENSITIVE_PREFIXES` a second, unguarded spelling. The leading `$` is
+  stripped as a token edge, so `$HOME/.ssh/config` arrived at the matcher as
+  the relative-looking `HOME/.ssh/config` and faced only the narrow
+  leaf-marker fallback; `cat $HOME/.aws/credentials`, `cp $HOME/.kube/config
+  /tmp/leak.txt`, `cat ${HOME}/.gnupg/secring.gpg` and `rm -rf $HOME/.ssh` all
+  ran at the real `exec_command` boundary, past a block that is meant to
+  survive user approval. `sensitive_path_marker()` expands before choosing a
+  matcher, `sensitive_path_in_text()` re-scans the expanded text when the
+  literal scan comes up empty, and `_is_root_target()` expands for the same
+  reason — `rm -rf $ROOTDIR` is a root wipe the literal text hides. Undefined
+  names are left as written, so nothing new matches on a host where the
+  variable does not exist, and the workspace exception still applies to the
+  expanded path
+  ([#985](https://github.com/use-agent-os/agent-os/issues/985)).
+- `agentos upgrade` keeps the operator's real `PATH` on Windows. Windows
+  environment variables are case-insensitive and the OS spells the search path
+  `Path`, but `hardened_path_env` copied the environment into a plain dict —
+  which is case-*sensitive* — then read `env.get("PATH", "")` and got nothing.
+  It wrote the fallback login dirs back under a brand-new `PATH` key, so the
+  environment carried two competing variables and the one the upgrade
+  subprocess reads no longer contained `uv`, `pipx`, or anything else the user
+  had installed. `resolve_tool` compounded it by reading `hardened["PATH"]`
+  directly: the miss handed `shutil.which` a `None` path, falling back to the
+  un-hardened process environment the helper exists to replace. Both now
+  resolve the key case-insensitively on Windows and write back to whichever
+  spelling was already there; POSIX still treats `PATH` and `Path` as the
+  different variables they are
+  ([#1069](https://github.com/use-agent-os/agent-os/issues/1069)).
+- A tool result too large for the whole disk budget is refused before the
+  store is pruned, instead of after every record in it has been deleted.
+  `_prune_to_fit` took the oldest records off one at a time chasing room for a
+  snapshot that could never fit, and raised `ToolResultStoreBudgetError` only
+  once the store was empty; the caller in `agent.py` logs a `skipped` metric
+  and carries on, so unrelated records went to zero with nothing in the
+  transcript to say so. The budget check now runs first and nothing on disk is
+  touched. Pruning is unchanged for writes that can fit — the oldest records
+  still come off, and only as many as needed — and the trailing raise it
+  replaces was unreachable in every other case, since an emptied store always
+  satisfies the loop's own exit test
+  ([#996](https://github.com/use-agent-os/agent-os/issues/996)).
+- The browser `eval` SSRF pre-scan now sees obfuscated targets. It matched
+  only literal `http(s)://` text, so three spellings of a private or
+  cloud-metadata URL reached the evaluator unblocked: protocol-relative
+  `fetch('//169.254.169.254/latest/meta-data/')`, which inherits the page's
+  scheme and lands on exactly the same address; the loopback form
+  `fetch('//127.0.0.1:8080/admin')`; and a protocol split across literals,
+  `fetch('htt' + 'p://169.254.169.254/…')`. This scan is the *only* network
+  guard the eval action gets — the post-eval page-URL recheck fires when the
+  page navigates, and a direct `fetch` never navigates — while the denylist
+  layer that would otherwise catch `fetch` is opt-in and off by default. The
+  scan now also screens protocol-relative targets and the concatenation of
+  every decoded string literal, reusing the split-token technique the denylist
+  already had. A protocol-relative target is read only from a string literal
+  that is entirely the URL, so a `//` line comment stays a comment, and a
+  candidate the scan *derived* rather than read counts only once its host
+  resolves to a private or metadata address — otherwise `'base' + '//a/b'`
+  would be refused as readily as `'//127.0.0.1/x'`
+  ([#1092](https://github.com/use-agent-os/agent-os/issues/1092)).
+- `bankr` and `openai_responses` failures classify like every other
+  OpenAI-compatible provider instead of falling through to `UNKNOWN`. Both are
+  real registered providers, and both declare `failure_family="openai_compat"`
+  in `provider/registry.py`, but neither appeared in the hand-kept
+  `_OPENAI_COMPAT_PROVIDERS` literal in `provider/failures.py`, so their 401,
+  402 and 429 lost the auth / credit / rate-limit semantics the runtime uses to
+  choose `FAIL_CONFIG` or `FALLBACK_PROVIDER`. The literal was the wrong shape
+  rather than merely two names short: it had drifted to six missing providers
+  (`bankr`, `openai_responses`, `github_copilot`, `openai_codex`,
+  `byteplus_coding_plan`, `volcengine_coding_plan`), and #775 reported the
+  `bankr` half a while ago without the fix landing. It is now derived from the
+  registry's own `failure_family` field, with a test asserting the two files
+  agree in both directions
+  ([#1126](https://github.com/use-agent-os/agent-os/issues/1126)).
+- `code_exec` removes its ephemeral working directory on every exit, not just
+  the one path that happened to own the cleanup. `execute_code` creates the
+  directory with `tempfile.mkdtemp(prefix="agentos_exec_")` whenever no
+  workspace is configured, but the `shutil.rmtree` hung off the `finally` of
+  the non-sandbox branch alone. Every exit from the sandbox branch — gate
+  denial, a backend that raised, an escalation denial, a subprocess timeout, a
+  spawn error, and the success path too — returned past it and left one
+  directory behind per call, growing without bound on a long-running agent.
+  The whole execution now sits inside the try whose `finally` owns the
+  cleanup, so there is one exit path for the tempdir instead of six that skip
+  it. A configured workspace still sets no `cleanup_dir` and is never removed
+  ([#1010](https://github.com/use-agent-os/agent-os/issues/1010)).
+- A local version label containing `dev` or `post` no longer demotes a final
+  release. `parse_version()` in `compat/version_utils.py` already captured
+  `+local` into its own regex group, but the fallbacks for a bare `.post` /
+  `.dev` segment re-scanned the *whole* raw string with `re.search`, and the
+  optional `[._-]?` delimiter let those patterns match anywhere — including
+  inside the label. `2026.7.18+dev` parsed as `.dev0` and `2026.7.18+postgres`
+  as `.post0`, so a released build sorted as a pre-release and `is_newer()`
+  inverted, producing spurious upgrade notices and wrong version-skew answers.
+  PEP 440 says a local label must not affect ordering. The regex now names the
+  `post` and `dev` literals (`post_l` / `dev_l`), so "was the segment present"
+  is answered by the anchored match instead of a re-scan; a bare `.post` /
+  `.dev` still means 0, and `+dev`, `+postgres`, `+device` and `+local.post1`
+  are ignored for ordering
+  ([#1130](https://github.com/use-agent-os/agent-os/issues/1130)).
+- A replacement agent task stays in `AgentTaskRegistry` when its predecessor
+  finishes winding down. Cancellation is not synchronous: `register()` may put
+  a new task under a session key while the cancelled one is still settling,
+  and the predecessor's done-callback then popped the key unconditionally —
+  evicting a task that is still running. Abort and status queries went blind
+  to it, so a session could be left with an unreachable agent turn that no
+  later cancel could reach. `_on_done` now removes the entry only when the
+  registry still holds the task the callback belongs to, leaving a replacement
+  registered
+  ([#1026](https://github.com/use-agent-os/agent-os/issues/1026)).
+- `code_exec` blocks destructive calls reached through `compile`, `getattr`
+  and `builtins.__import__`. The AST scan added in #848 read `eval`/`exec`
+  arguments as string expressions only, so wrapping the same source in a code
+  carrier walked straight past it: `exec(compile("import os; os.remove('/x')",
+  "<s>", "exec"))` was allowed, and so was the renamed carrier `c = compile;
+  exec(c(...))`. Two more spellings of the same call bypassed the module
+  resolver — `getattr(os, "sys" + "tem")("rm -rf /")`, whose callee is a
+  `Call` rather than an `Attribute` and therefore never reached the attribute
+  branch, and `builtins.__import__("os")` / `getattr(builtins,
+  "__import__")("os")`, which the resolver only recognised in its bare
+  `__import__` spelling. `_eval_const_str` now resolves a `compile(...)` call
+  to its `source` argument (positional or keyword) with local aliases tracked
+  through `visit_Assign`, a new `_resolve_getattr_target` resolves both halves
+  of a `getattr` statically, and the module resolver accepts `__import__`
+  through an attribute or a dynamically fetched callee
+  ([#1102](https://github.com/use-agent-os/agent-os/issues/1102)).
+- The fork-bomb hard block matches the fork bomb. `:(){ :|:& };:` was written
+  into `_HARD_BLOCK_PATTERNS` as a raw string, so `re` read `(){ :\|:& }` as a
+  *group* and `{ … }` as a quantifier: the pattern compiled to an empty
+  capture followed by literal text, and the classic one-liner a scheduled
+  prompt could carry went unblocked. The parens, braces and separators are now
+  escaped and joined with `\s*`, so the bomb is caught with or without the
+  whitespace variations it is usually pasted with
+  ([#998](https://github.com/use-agent-os/agent-os/issues/998)).
+- `read_spreadsheet` no longer shreds CSV and TSV rows that contain a
+  multiline quoted field. `_read_delimited_rows` handed `csv.reader` the
+  output of `text.splitlines()`, which cuts on the newline *inside* a quoted
+  cell — a perfectly valid `"line one\nline two"` address or note field became
+  two half-parsed rows, silently misaligning every column after it. The reader
+  now consumes an `io.StringIO` over the whole text, which is what
+  `csv.reader` expects, so embedded newlines stay inside their cell
+  ([#1023](https://github.com/use-agent-os/agent-os/issues/1023)).
+- A Markdown table with a ragged row renders on Telegram instead of raising.
+  `_render_table` unpacked two-column rows as `label, value = row` and used
+  `zip(..., strict=True)` for wider ones, so any row whose cell count differed
+  from the header — routine in model-generated Markdown, where a trailing
+  empty cell or an extra pipe is common — raised `ValueError` out of the
+  formatter and cost the user the whole message. Rows are now padded or
+  truncated to the header's column count, and the parser stops discarding the
+  remainder of a table at the first ragged row
+  ([#1031](https://github.com/use-agent-os/agent-os/issues/1031)).
+- Microsoft Teams streaming sends the text of the chunk it was called for.
+  The `_send` closure read `accumulated` from the enclosing scope while its
+  sibling `_edit` bound the same value as a default argument; because the
+  callback runs inside `adapter.continue_conversation` after the loop has
+  moved on, the first message of a stream could go out carrying a later
+  chunk's text — or, if the turn finished first, the whole answer duplicated.
+  `_send` now binds the text by value the way `_edit` does
+  ([#1046](https://github.com/use-agent-os/agent-os/issues/1046)).
+- `agentos skills publish` reports a failed fork as a failure and exits
+  non-zero. The publisher called `gh repo fork` and then `await proc.wait()`
+  without ever reading the return code, so a missing `gh` auth, a rate limit
+  or a repo that cannot be forked still produced `Fork created, use branch
+  'skill/<name>' to submit` — advice for a fork that does not exist. The CLI
+  compounded it by printing `Failed:` and exiting 0, so scripted publishes
+  reported success. The fork's exit status and stderr are now checked and
+  surfaced in the message, and the command raises `typer.Exit(1)` on failure
+  ([#1050](https://github.com/use-agent-os/agent-os/issues/1050)).
+- Bundled skill scripts create the parent directory of their `--out` /
+  `--output` path. Seven entry points — `docx`, `xlsx`, `pdf-toolkit`,
+  `multi-search-engine`, and the `robinhood-chain-stocks` and
+  `robinhood-rwa-addresses` card writers — went straight to `write_text`, so
+  the natural `--out reports/summary.json` died with `FileNotFoundError` after
+  the expensive work was already done, losing the result. Each now calls
+  `mkdir(parents=True, exist_ok=True)` on the parent before writing
+  ([#1055](https://github.com/use-agent-os/agent-os/issues/1055)).
+
 ## [2026.9.6] - 2026-09-06
 
 ### Fixed

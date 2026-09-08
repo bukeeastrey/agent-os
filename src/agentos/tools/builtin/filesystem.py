@@ -6,6 +6,7 @@ import asyncio
 import csv
 import fnmatch
 import functools
+import io
 import json
 import os
 import posixpath
@@ -505,7 +506,7 @@ async def read_file(path: str, offset: int | None = None, limit: int | None = No
     if not p.is_file():
         raise IsADirectoryError(f"Path is a directory: {path}")
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     sample: bytes = await loop.run_in_executor(None, _read_binary_sample, p)
     if not sample:
         return ""
@@ -565,7 +566,7 @@ async def read_spreadsheet(
     ext = p.suffix.lower()
     row_offset = offset if offset and offset > 0 else 1
     row_limit = limit if limit and limit > 0 else 200
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     if ext in {".csv", ".tsv"}:
         delimiter = "\t" if ext == ".tsv" else ","
@@ -592,7 +593,7 @@ def _read_delimited_rows(path: Path, delimiter: str) -> list[tuple[str, list[lis
         text = path.read_text(encoding="utf-8-sig")
     except UnicodeDecodeError as exc:
         raise ToolError(f"Cannot read spreadsheet as UTF-8 text: {path}") from exc
-    rows = [[cell for cell in row] for row in csv.reader(text.splitlines(), delimiter=delimiter)]
+    rows = [list(row) for row in csv.reader(io.StringIO(text), delimiter=delimiter)]
     return [(path.name, rows)]
 
 
@@ -777,7 +778,7 @@ async def write_file(path: str, content: str, approval_id: str | None = None) ->
     if approval is not None:
         return json.dumps(approval)
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     created = not p.exists()
 
     def _write() -> None:
@@ -850,7 +851,7 @@ async def edit_file(
     if not p.exists():
         raise FileNotFoundError(f"File not found: {path}")
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     original = await loop.run_in_executor(None, p.read_text, "utf-8")
 
     # The matcher is the CPU-bound part of an edit, not the read or the write:
@@ -901,7 +902,7 @@ async def list_dir(path: str) -> str:
     if not p.is_dir():
         raise NotADirectoryError(f"Not a directory: {path}")
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     strict_roots = _strict_read_roots()
     workspace_root = _workspace_root()
 
@@ -955,7 +956,7 @@ async def glob_search(pattern: str, path: str | None = None) -> str:
         return json.dumps(blocked)
     _gate_workspace_strict_read("glob_search", base, path or str(base))
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     strict_roots = _strict_read_roots()
     workspace_root = _workspace_root()
 
@@ -1007,7 +1008,7 @@ async def grep_search(
         return json.dumps(blocked)
     _gate_workspace_strict_read("grep_search", base, path or str(base))
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     strict_roots = _strict_read_roots()
     workspace_root = _workspace_root()
 
