@@ -662,3 +662,26 @@ def test_default_router_exposes_bankr_source(monkeypatch) -> None:
         assert "bankr" in router.source_ids
     finally:
         defaults._default_router = None
+
+
+@pytest.mark.asyncio
+async def test_search_partial_failure_returns_surviving_skills(monkeypatch) -> None:
+    """If one skill raises an unhandled exception during catalog load,
+    surviving skills are returned rather than failing the whole catalog fetch.
+    """
+    import httpx
+
+    class _FailingAsyncClient(_AsyncClient):
+        async def get(self, url: str, **kwargs: Any) -> _Response:
+            if "alchemy" in url:
+                raise ConnectionResetError("Network reset during fetch")
+            return await super().get(url, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", _FailingAsyncClient)
+
+    src = BankrSource(allowlist=_FIXTURE_SLUGS)
+    results = await src.search("")
+    names = {r.name for r in results}
+    assert "bankr" in names
+    assert "alchemy" not in names
+

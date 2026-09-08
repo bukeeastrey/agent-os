@@ -150,12 +150,15 @@ class CapminalSource(SkillSource):
                     async with sem:
                         return await self._load_catalog_entry(client, slug)
 
-                loaded = await asyncio.gather(*(_load_one(s) for s in self._allowlist))
+                loaded = await asyncio.gather(
+                    *(_load_one(s) for s in self._allowlist),
+                    return_exceptions=True,
+                )
         except Exception as exc:
             log.warning("capminal.fetch_failed", error=str(exc))
             return None
 
-        metas = [m for m in loaded if m is not None]
+        metas = [m for m in loaded if m is not None and not isinstance(m, BaseException)]
         if not metas:
             return None
         metas.sort(key=lambda m: m.name)

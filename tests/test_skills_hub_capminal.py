@@ -215,3 +215,26 @@ async def test_inspect_and_fetch_enforce_allowlist(monkeypatch) -> None:
 
     assert await src.fetch(disallowed_slug) is None
     assert fetched_id is None
+
+
+@pytest.mark.asyncio
+async def test_search_partial_failure_returns_surviving_skills(monkeypatch) -> None:
+    """If one skill in the allowlist raises an unhandled exception during load,
+    the remaining skills must still load and not fail the entire catalog.
+    """
+    import httpx
+
+    class _FailingAsyncClient(_AsyncClient):
+        async def get(self, url: str, **kwargs: Any) -> _Response:
+            if "morse-launch-b20" in url:
+                raise ConnectionResetError("Connection dropped by peer")
+            return await super().get(url, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", _FailingAsyncClient)
+
+    results = await _source().search("")
+    names = {r.name for r in results}
+    assert "capminal" in names
+    assert "contract-interaction" in names
+    assert "morse-launch-b20" not in names
+
