@@ -471,9 +471,11 @@ def _apply_hunk(file_lines: list[str], hunk: Hunk) -> list[str]:
     check_pos = pos
     for raw in hunk.lines:
         if not raw:
-            continue
-        prefix = raw[0]
-        content = raw[1:]
+            prefix = " "
+            content = ""
+        else:
+            prefix = raw[0]
+            content = raw[1:]
         if prefix in (" ", "-"):
             if check_pos >= len(result):
                 raise ValueError(f"Hunk context/delete at line {check_pos + 1} exceeds file length")
@@ -491,9 +493,11 @@ def _apply_hunk(file_lines: list[str], hunk: Hunk) -> list[str]:
     src_pos = pos
     for raw in hunk.lines:
         if not raw:
-            continue
-        prefix = raw[0]
-        content = raw[1:]
+            prefix = " "
+            content = ""
+        else:
+            prefix = raw[0]
+            content = raw[1:]
         if prefix == " ":
             new_lines.append(result[src_pos])
             src_pos += 1
