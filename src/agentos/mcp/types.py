@@ -32,3 +32,19 @@ class MCPToolDef:
 class MCPToolResult:
     content: str
     is_error: bool = False
+
+
+@dataclass
+class MCPResourceDef:
+    uri: str
+    name: str
+    description: str = ""
+    mime_type: str | None = None
+
+
+@dataclass
+class MCPResourceContent:
+    uri: str
+    mime_type: str | None = None
+    text: str | None = None
+    blob: str | None = None

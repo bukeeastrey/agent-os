@@ -363,6 +363,24 @@ for line in sys.stdin:
         }
     elif method == "tools/call":
         result = {"content": [{"type": "text", "text": message["params"]["arguments"]["text"]}]}
+    elif method == "resources/list":
+        result = {
+            "resources": [
+                {
+                    "uri": "demo://notes",
+                    "name": "Notes",
+                    "description": "Demo notes",
+                    "mimeType": "text/plain",
+                }
+            ]
+        }
+    elif method == "resources/read":
+        uri = message["params"]["uri"]
+        result = {
+            "contents": [
+                {"uri": uri, "mimeType": "text/plain", "text": "hello from resource"}
+            ]
+        }
     else:
         result = {}
     sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": message["id"], "result": result}) + "\\n")
@@ -416,3 +434,31 @@ async def test_concurrent_tool_calls_serialized_safely(tmp_path: Path) -> None:
     assert len(results) == 10
     assert [r.content for r in results] == [f"msg-{i}" for i in range(10)]
     assert all(not r.is_error for r in results)
+
+
+@pytest.mark.asyncio
+async def test_list_and_read_resources_from_stdio_server(tmp_path: Path) -> None:
+    """MCPStdioClient supports listing and reading MCP resources."""
+    server = tmp_path / "server.py"
+    server.write_text(_SPEC_COMPLIANT_SERVER)
+    client = MCPStdioClient(
+        MCPServerConfig(name="demo", transport="stdio", command=sys.executable, args=[str(server)])
+    )
+
+    try:
+        await client.connect()
+        resources = await client.list_resources()
+        contents = await client.read_resource("demo://notes")
+    finally:
+        await client.close()
+
+    assert len(resources) == 1
+    assert resources[0].uri == "demo://notes"
+    assert resources[0].name == "Notes"
+    assert resources[0].description == "Demo notes"
+    assert resources[0].mime_type == "text/plain"
+
+    assert len(contents) == 1
+    assert contents[0].uri == "demo://notes"
+    assert contents[0].text == "hello from resource"
+    assert contents[0].mime_type == "text/plain"

@@ -9,7 +9,13 @@ from abc import ABC, abstractmethod
 from contextlib import AsyncExitStack
 from typing import Any
 
-from agentos.mcp.types import MCPServerConfig, MCPToolDef, MCPToolResult
+from agentos.mcp.types import (
+    MCPResourceContent,
+    MCPResourceDef,
+    MCPServerConfig,
+    MCPToolDef,
+    MCPToolResult,
+)
 
 
 class MCPClient(ABC):
@@ -33,6 +39,14 @@ class MCPClient(ABC):
     @abstractmethod
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> MCPToolResult:
         """Call a tool on the MCP server."""
+
+    @abstractmethod
+    async def list_resources(self) -> list[MCPResourceDef]:
+        """List available resources from the MCP server."""
+
+    @abstractmethod
+    async def read_resource(self, uri: str) -> list[MCPResourceContent]:
+        """Read a resource by URI from the MCP server."""
 
 
 class MCPSessionClient(MCPClient):
@@ -204,3 +218,29 @@ class MCPSessionClient(MCPClient):
             content="\n".join(chunks),
             is_error=bool(getattr(result, "isError", False)),
         )
+
+    async def list_resources(self) -> list[MCPResourceDef]:
+        """List resources from the MCP server."""
+        result = await self._require_session().list_resources()
+        return [
+            MCPResourceDef(
+                uri=str(resource.uri),
+                name=resource.name,
+                description=getattr(resource, "description", "") or "",
+                mime_type=getattr(resource, "mimeType", None),
+            )
+            for resource in result.resources
+        ]
+
+    async def read_resource(self, uri: str) -> list[MCPResourceContent]:
+        """Read a resource by URI from the MCP server."""
+        result = await self._require_session().read_resource(uri)
+        return [
+            MCPResourceContent(
+                uri=str(content.uri),
+                mime_type=getattr(content, "mimeType", None),
+                text=getattr(content, "text", None),
+                blob=getattr(content, "blob", None),
+            )
+            for content in result.contents
+        ]

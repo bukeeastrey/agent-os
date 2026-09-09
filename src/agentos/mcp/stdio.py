@@ -9,7 +9,13 @@ from typing import Any, cast
 
 from agentos import __version__
 from agentos.mcp.client import MCPClient
-from agentos.mcp.types import MCPServerConfig, MCPToolDef, MCPToolResult
+from agentos.mcp.types import (
+    MCPResourceContent,
+    MCPResourceDef,
+    MCPServerConfig,
+    MCPToolDef,
+    MCPToolResult,
+)
 
 
 class MCPStdioClient(MCPClient):
@@ -228,4 +234,37 @@ class MCPStdioClient(MCPClient):
         result = response.get("result", {})
         content_list = result.get("content", [])
         text = "\n".join(c.get("text", "") for c in content_list if c.get("type") == "text")
-        return MCPToolResult(content=text)
+        return MCPToolResult(content=text, is_error=bool(result.get("isError", False)))
+
+    async def list_resources(self) -> list[MCPResourceDef]:
+        """List resources from the MCP server."""
+        response = await self._send_request("resources/list")
+        if "error" in response:
+            return []
+        resources_data = response.get("result", {}).get("resources", [])
+        return [
+            MCPResourceDef(
+                uri=r["uri"],
+                name=r.get("name", ""),
+                description=r.get("description", ""),
+                mime_type=r.get("mimeType"),
+            )
+            for r in resources_data
+        ]
+
+    async def read_resource(self, uri: str) -> list[MCPResourceContent]:
+        """Read a resource by URI from the MCP server."""
+        response = await self._send_request("resources/read", {"uri": uri})
+        if "error" in response:
+            return []
+        result = response.get("result", {})
+        contents_data = result.get("contents", [])
+        return [
+            MCPResourceContent(
+                uri=c.get("uri", uri),
+                mime_type=c.get("mimeType"),
+                text=c.get("text"),
+                blob=c.get("blob"),
+            )
+            for c in contents_data
+        ]

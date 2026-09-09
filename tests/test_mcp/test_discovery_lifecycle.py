@@ -7,7 +7,13 @@ import pytest
 import pytest_asyncio
 
 from agentos.mcp.client import MCPClient
-from agentos.mcp.types import MCPServerConfig, MCPToolDef, MCPToolResult
+from agentos.mcp.types import (
+    MCPResourceContent,
+    MCPResourceDef,
+    MCPServerConfig,
+    MCPToolDef,
+    MCPToolResult,
+)
 from agentos.tools.registry import ToolRegistry
 
 
@@ -16,11 +22,13 @@ class FakeMCPClient(MCPClient):
         self,
         config: MCPServerConfig,
         tools: list[MCPToolDef] | None = None,
+        resources: list[MCPResourceDef] | None = None,
         *,
         fail_list: bool = False,
     ) -> None:
         super().__init__(config)
         self.tools = tools or []
+        self.resources = resources or []
         self.fail_list = fail_list
         self.connected = False
         self.closed = False
@@ -38,6 +46,12 @@ class FakeMCPClient(MCPClient):
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> MCPToolResult:
         return MCPToolResult(content=f"{name}:{arguments}")
+
+    async def list_resources(self) -> list[MCPResourceDef]:
+        return self.resources
+
+    async def read_resource(self, uri: str) -> list[MCPResourceContent]:
+        return [MCPResourceContent(uri=uri, text=f"content of {uri}")]
 
 
 @pytest_asyncio.fixture(autouse=True)
