@@ -120,7 +120,7 @@ def test_syntax_error_code_falls_back_to_regex() -> None:
         ("exec(compile('os.re' + 'move(\"/etc/x\")', '', 'exec'))", "remove"),
         ("eval(compile('os.re' + 'move(\"/etc/x\")', '', 'eval'))", "remove"),
         ("exec(compile('shutil.rm' + 'tree(\"/etc/x\")', '', 'exec'))", "rmtree"),
-        ("exec(compile('os.sys' + 'tem(\"rm -rf /etc/x\")', '', 'exec'))", "os.system with rm"),
+        ("exec(compile('os.sys' + 'tem(\"rm -rf /etc/x\")', '', 'exec'))", "os.system"),
         (
             "exec(compile(source='os.re' + 'move(\"/etc/x\")', filename='', mode='exec'))",
             "remove",
@@ -135,22 +135,22 @@ def test_syntax_error_code_falls_back_to_regex() -> None:
         # Shell-exec attrs via getattr: `system`, `popen`, and the subprocess
         # entrypoints are not in _ALL_DESTRUCTIVE_NAMES, so the getattr branch
         # skipped them entirely.
-        ("import os; getattr(os, 'system')('rm -rf /etc/x')", "os.system with rm"),
-        ("import os; getattr(os, 'sys' + 'tem')('rm -rf /etc/x')", "os.system with rm"),
-        ("import os; getattr(os, 'popen')('rm -rf /etc/x')", "os.popen with rm"),
+        ("import os; getattr(os, 'system')('rm -rf /etc/x')", "os.system"),
+        ("import os; getattr(os, 'sys' + 'tem')('rm -rf /etc/x')", "os.system"),
+        ("import os; getattr(os, 'popen')('rm -rf /etc/x')", "os.popen"),
         (
             "import subprocess; getattr(subprocess, 'run')(['rm', '-rf', '/etc/x'])",
-            "subprocess invoking rm",
+            "subprocess",
         ),
         (
             "import subprocess; getattr(subprocess, 'Popen')('rm -rf /etc/x')",
-            "subprocess invoking rm",
+            "subprocess",
         ),
         # Combinations of both indirections.
-        ("getattr(__import__('os'), 'system')('rm -rf /etc/x')", "os.system with rm"),
+        ("getattr(__import__('os'), 'system')('rm -rf /etc/x')", "os.system"),
         (
             "exec(compile('getattr(os, \"sys\" + \"tem\")(\"rm -rf /etc/x\")', '', 'exec'))",
-            "os.system with rm",
+            "os.system",
         ),
     ],
 )

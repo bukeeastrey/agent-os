@@ -286,7 +286,7 @@ class _DestructiveCodeVisitor(ast.NodeVisitor):
                 return
 
             if mod == "os" and attr_name in ("system", "popen") and node.args:
-                cmd_str = _eval_const_str(node.args[0])
+                cmd_str = _eval_const_str(node.args[0], frozenset(self.compile_aliases))
                 if cmd_str and _SHELL_DELETE_RE.search(cmd_str):
                     self.warning = (
                         f"destructive Python operation detected: os.{attr_name} with delete command"
@@ -294,33 +294,11 @@ class _DestructiveCodeVisitor(ast.NodeVisitor):
                     return
 
             if mod == "subprocess" and attr_name in _SUBPROCESS_CALL_NAMES and node.args:
-                first_arg = node.args[0]
-                if isinstance(first_arg, ast.List):
-                    parts = [_eval_const_str(elt) for elt in first_arg.elts]
-                    if any(
-                        p and p.lower() in _SHELL_DELETE_CMDS for p in parts if p is not None
-                    ):
-                        self.warning = (
-                            "destructive Python operation detected: "
-                            "subprocess invoking delete command"
-                        )
-                        return
-                else:
-                    cmd_str = _eval_const_str(first_arg)
-                    if cmd_str and _SHELL_DELETE_RE.search(cmd_str):
-                        self.warning = (
-                            "destructive Python operation detected: "
-                            "subprocess invoking delete command"
-                        )
-                        return
-                cmd_str = _eval_const_str(node.args[0], frozenset(self.compile_aliases))
-                if cmd_str and re.search(r"\b(rm|rmdir)\b", cmd_str):
-                    self.warning = f"destructive Python operation detected: os.{attr_name} with rm"
-                    return
-
-            if mod == "subprocess" and attr_name in _SUBPROCESS_CALL_NAMES and node.args:
                 if self._subprocess_argv_removes(node.args[0]):
-                    self.warning = "destructive Python operation detected: subprocess invoking rm"
+                    self.warning = (
+                        "destructive Python operation detected: "
+                        "subprocess invoking delete command"
+                    )
                     return
 
         self.generic_visit(node)
@@ -333,21 +311,29 @@ class _DestructiveCodeVisitor(ast.NodeVisitor):
             return f"destructive Python operation detected: shutil.{attr}() via getattr"
         if module == "os" and attr in ("system", "popen") and node.args:
             cmd_str = _eval_const_str(node.args[0], frozenset(self.compile_aliases))
-            if cmd_str and re.search(r"\b(rm|rmdir)\b", cmd_str):
-                return f"destructive Python operation detected: os.{attr} with rm via getattr"
+            if cmd_str and _SHELL_DELETE_RE.search(cmd_str):
+                return (
+                    f"destructive Python operation detected: os.{attr} "
+                    "with delete command via getattr"
+                )
         if module == "subprocess" and attr in _SUBPROCESS_CALL_NAMES and node.args:
             if self._subprocess_argv_removes(node.args[0]):
-                return "destructive Python operation detected: subprocess invoking rm via getattr"
+                return (
+                    "destructive Python operation detected: "
+                    "subprocess invoking delete command via getattr"
+                )
         return None
 
     def _subprocess_argv_removes(self, first_arg: ast.expr) -> bool:
-        """True when a subprocess argv (list or string form) invokes rm/rmdir."""
+        """True when a subprocess argv (list or string form) invokes delete commands."""
         aliases = frozenset(self.compile_aliases)
         if isinstance(first_arg, ast.List):
             parts = [_eval_const_str(elt, aliases) for elt in first_arg.elts]
-            return any(part in ("rm", "rmdir") for part in parts if part is not None)
+            return any(
+                part and part.lower() in _SHELL_DELETE_CMDS for part in parts if part is not None
+            )
         cmd_str = _eval_const_str(first_arg, aliases)
-        return bool(cmd_str and re.search(r"\b(rm|rmdir)\b", cmd_str))
+        return bool(cmd_str and _SHELL_DELETE_RE.search(cmd_str))
 
 
 def _check_code_destructive(code: str) -> str | None:
