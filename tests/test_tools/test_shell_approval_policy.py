@@ -277,6 +277,82 @@ async def test_approved_destructive_code_exec_uses_host_grant_when_sandbox_enabl
 
 
 @pytest.mark.asyncio
+async def test_destructive_code_exec_approval_is_not_truncated(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #1567: code_exec must pass full code to _check_exec_approval, not code[:200].
+
+    Operators reviewing the approval prompt must see destructive statements even if
+    preceded by long docstrings, comments, or imports (>200 chars).
+    """
+    ctx = current_tool_context.get()
+    assert ctx is not None
+    ctx.workspace_dir = str(tmp_path)
+    target = tmp_path / "target.txt"
+    target.write_text("delete me", encoding="utf-8")
+    configure_runtime(
+        SandboxSettings(
+            sandbox=True,
+            security_grading=True,
+            backend="noop",
+            allow_legacy_mode=True,
+        ),
+        workspace=tmp_path,
+    )
+    monkeypatch.setattr(
+        code_exec,
+        "_resolve_python_bin",
+        lambda *, sandbox_enabled: sys.executable,
+    )
+
+    preamble = (
+        '"""Utility script to prepare workspace environment.\n\n'
+        "This module performs configuration setup, logging initialization, and data checks\n"
+        "across the entire project workspace prior to executing critical operations.\n"
+        '"""\n'
+        "import os\n"
+        "import sys\n"
+    )
+    assert len(preamble) > 200
+
+    destructive_statement = "os.remove('target.txt')\n"
+    code = f"{preamble}\n{destructive_statement}"
+    assert len(code) > 200
+    assert code[:200] == preamble[:200]
+    assert "os.remove" not in code[:200]
+
+    res = await execute_code(code)
+    pending = json.loads(res)
+    assert pending["status"] == "approval_required"
+    approval_id = str(pending["approval_id"])
+
+    # Pending response payload carries untruncated code
+    assert pending["command"] == code
+    assert "os.remove('target.txt')" in pending["command"]
+
+    # Stored approval record carries untruncated code in command and args
+    queue = get_approval_queue()
+    entry = queue.get(approval_id)
+    assert entry.params["command"] == code
+    assert entry.params["args"]["command"] == code
+    assert entry.params["command"] != code[:200]
+    assert "os.remove('target.txt')" in entry.params["command"]
+
+    # Approval resolution matches untruncated code and executes
+    queue.resolve(approval_id, approved=True)
+    result = await execute_code(code, approval_id=approval_id)
+    payload = json.loads(result)
+    assert payload["exit_code"] == 0
+    assert not target.exists()
+
+    # Tampered command cannot consume the approval granted for the original code
+    code_tampered = f"{code}print('tampered')\n"
+    with pytest.raises(ToolError, match="Approval does not match the requested command"):
+        await execute_code(code_tampered, approval_id=approval_id)
+
+
+@pytest.mark.asyncio
 async def test_approved_background_process_uses_host_grant_when_sandbox_enabled(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

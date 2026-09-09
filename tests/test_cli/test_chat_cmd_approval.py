@@ -88,3 +88,53 @@ async def test_maybe_handle_approval_required_invokes_prompt_and_resolver(monkey
 
     assert calls == [("pid-2", True, False)]
     assert "Approval required" in buffer.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_maybe_handle_approval_renders_full_command_without_truncation(monkeypatch) -> None:
+    live = _FakeLive()
+    buffer = StringIO()
+    monkeypatch.setattr(
+        approval_mod,
+        "console",
+        Console(file=buffer, force_terminal=False, width=120, highlight=False),
+    )
+
+    async def _prompt(_: str, **_kwargs) -> str:
+        return "o"
+
+    monkeypatch.setattr(approval_mod, "prompt_approval", _prompt)
+
+    calls: list[tuple[str, bool, bool]] = []
+
+    async def resolver(approval_id: str, approved: bool, *, allow_always: bool = False) -> None:
+        calls.append((approval_id, approved, allow_always))
+
+    long_script = (
+        '"""Long setup script preamble that exceeds two hundred characters in total length.\n'
+        "Importing required modules and configuring parameters before doing any work.\n"
+        '"""\n'
+        "import os\n"
+        "import shutil\n"
+        'shutil.rmtree("/tmp/target_directory")\n'
+    )
+    assert len(long_script) > 200
+
+    await approval_mod.maybe_handle_approval(
+        {
+            "status": "approval_required",
+            "approval_id": "pid-long-code",
+            "command": long_script,
+            "warning": "Destructive Python operation",
+        },
+        live,
+        resolver,
+    )
+
+    assert calls == [("pid-long-code", True, False)]
+    rendered = buffer.getvalue()
+    assert "Approval required" in rendered
+    # Confirm downstream CLI renderer shows the entire command including the destructive tail
+    # past character 200.
+    assert "Long setup script preamble" in rendered
+    assert 'shutil.rmtree("/tmp/target_directory")' in rendered

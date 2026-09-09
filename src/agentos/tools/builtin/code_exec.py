@@ -659,7 +659,7 @@ async def execute_code(
         try:
             approval_response = await _check_exec_approval(
                 tool_name="execute_code",
-                command=code[:200],
+                command=code,
                 workdir=None,
                 warning=warning,
                 approval_id=approval_id,
