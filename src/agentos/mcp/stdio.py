@@ -85,6 +85,8 @@ class MCPStdioClient(MCPClient):
                         f"MCP server message exceeds {cls._MAX_MESSAGE_BYTES} bytes "
                         "with no newline delimiter"
                     ) from exc
+                if chunks[-1].endswith(b"\n"):
+                    return b"".join(chunks)
                 continue
             except asyncio.IncompleteReadError as exc:
                 partial = b"".join([*chunks, exc.partial])

@@ -33,6 +33,7 @@ class _FakeProcess:
         self.wait_calls += 1
         if self.returncode is None:
             await asyncio.sleep(3600)
+        assert self.returncode is not None
         return self.returncode
 
 
@@ -271,6 +272,16 @@ async def test_read_response_reads_message_longer_than_the_stream_limit() -> Non
     """
     payload: dict[str, Any] = {"jsonrpc": "2.0", "id": 1, "result": {"text": "x" * 4096}}
     client = _client_reading(json.dumps(payload).encode() + b"\n", limit=64)
+
+    assert await client._read_response(1) == payload
+
+
+@pytest.mark.asyncio
+async def test_read_response_handles_overrun_with_newline_boundary() -> None:
+    """A message whose line exceeds StreamReader limit but ends with newline must be returned."""
+    payload: dict[str, Any] = {"jsonrpc": "2.0", "id": 1, "result": {"data": "test_overrun"}}
+    raw = json.dumps(payload).encode() + b"\n"
+    client = _client_reading(raw, limit=len(raw) - 1)
 
     assert await client._read_response(1) == payload
 
