@@ -27,7 +27,10 @@ from agentos.tools.types import ToolError, current_tool_context
 # shell warnlist hits. Catches the "agent pivots from `rm` to `os.remove()`"
 # bypass. We scan using shallow regex (fast-path) plus AST analysis to catch
 # dynamic evasion (getattr, __import__, importlib, exec/eval, and wildcard imports).
-_COMMAND_PREFIX: str = r"(?:^|[;&|])\s*(?:(?:cmd(?:\.exe)?\s+/[ck]|(?:powershell|pwsh)(?:\.exe)?(?:\s+-[a-zA-Z]+)*)\s+)?"
+_COMMAND_PREFIX: str = (
+    r"(?:^|[;&|])\s*"
+    r"(?:(?:cmd(?:\.exe)?\s+/[ck]|(?:powershell|pwsh)(?:\.exe)?(?:\s+-[a-zA-Z]+)*)\s+)?"
+)
 _IN_QUOTE_CMD_PREFIX: str = (
     r"(?:cmd(?:\.exe)?\s+/[ck]\s+|(?:powershell|pwsh)(?:\.exe)?(?:\s+-[a-zA-Z]+)*\s+)?"
 )
