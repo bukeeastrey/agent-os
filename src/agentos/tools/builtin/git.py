@@ -24,7 +24,10 @@ def _effective_workdir(workdir: str | None) -> str | None:
             else None
         )
         reject_foreign_host_path(workdir, platform=os.name, workspace=workspace)
-        return workdir
+        raw = Path(workdir).expanduser()
+        if not raw.is_absolute() and ctx and ctx.workspace_dir:
+            return str((Path(ctx.workspace_dir).expanduser().resolve() / raw).resolve())
+        return str(raw.resolve())
     if ctx and ctx.workspace_dir:
         return str(Path(ctx.workspace_dir).expanduser().resolve())
     return None
