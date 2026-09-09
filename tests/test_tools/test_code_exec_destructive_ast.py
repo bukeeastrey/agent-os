@@ -49,24 +49,27 @@ from agentos.tools.builtin.code_exec import _check_code_destructive
         ('import subprocess; subprocess.run(["rm", "-rf", "/tmp/x"])', "subprocess"),
         ('import subprocess as sp; sp.call(["rmdir", "/tmp/x"])', "subprocess"),
         # Windows deletion commands in subprocess and os.system
-        ('import subprocess; subprocess.run(["cmd.exe", "/c", "del", "C:\\tmp\\x"])', "subprocess"),
         (
-            'import subprocess; subprocess.run(["cmd.exe", "/c", "erase", "C:\\tmp\\x"])',
+            r'import subprocess; subprocess.run(["cmd.exe", "/c", "del", "C:\\tmp\\x"])',
             "subprocess",
         ),
         (
-            'import subprocess; subprocess.run(["cmd.exe", "/c", "rd", "/s", "C:\\tmp\\x"])',
+            r'import subprocess; subprocess.run(["cmd.exe", "/c", "erase", "C:\\tmp\\x"])',
             "subprocess",
         ),
         (
-            'import subprocess; subprocess.run(["powershell", "-c", "Remove-Item", "C:\\tmp\\x"])',
+            r'import subprocess; subprocess.run(["cmd.exe", "/c", "rd", "/s", "C:\\tmp\\x"])',
             "subprocess",
         ),
-        ('import os; os.system("del C:\\tmp\\x")', "os.system"),
-        ('import os; os.system("erase C:\\tmp\\x")', "os.system"),
-        ('import os; os.system("rd /s /q C:\\tmp\\x")', "os.system"),
-        ('import os; os.system("powershell Remove-Item C:\\tmp\\x")', "os.system"),
-        ('import os; os.popen("del C:\\tmp\\x")', "os.popen"),
+        (
+            r'import subprocess; subprocess.run(["powershell", "-c", "Remove-Item", "C:\\tmp\\x"])',
+            "subprocess",
+        ),
+        (r'import os; os.system("del C:\\tmp\\x")', "os.system"),
+        (r'import os; os.system("erase C:\\tmp\\x")', "os.system"),
+        (r'import os; os.system("rd /s /q C:\\tmp\\x")', "os.system"),
+        (r'import os; os.system("powershell Remove-Item C:\\tmp\\x")', "os.system"),
+        (r'import os; os.popen("del C:\\tmp\\x")', "os.popen"),
     ],
 )
 def test_destructive_ast_evasions_detected(code: str, expected_keyword: str) -> None:
@@ -92,6 +95,17 @@ def test_destructive_ast_evasions_detected(code: str, expected_keyword: str) -> 
         # Benign getattr
         "import os\npath_fn = getattr(os, 'getcwd')",
         "getattr(dict, 'get')",
+        # Benign non-command occurrences of rd and erase (anchoring negative matrix)
+        'import subprocess; subprocess.run(["curl", "-o", "out.bin", "https://cdn.example.com/rd"])',
+        'import subprocess; subprocess.run(["psql", "-c", "SELECT * FROM rd"])',
+        'import subprocess; subprocess.run(["git", "clone", "https://github.com/acme/rd"])',
+        'import subprocess; subprocess.run(["ls"], cwd="/data/rd")',
+        'import subprocess; subprocess.run(["node", "script.js", "--mode", "rd"])',
+        'import subprocess; subprocess.run(["helm", "install", "rd", "./chart"])',
+        'import subprocess; subprocess.check_output(["kubectl", "get", "pods", "-n", "rd"])',
+        'import subprocess; subprocess.run(["python", "train.py", "--dataset", "erase-bench"])',
+        'import os; os.system("aws s3 cp s3://bucket/rd ./")',
+        'import os; os.system("echo rd")',
     ],
 )
 def test_benign_code_does_not_trigger_warning(code: str) -> None:

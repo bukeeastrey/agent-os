@@ -34,24 +34,12 @@ def _git(repo: Path, *args: str) -> None:
     """
     missing = str(repo.parent / "no-such-gitconfig")
     subprocess.run(
-        [
-            "git",
-            "-c",
-            "user.name=t",
-            "-c",
-            "user.email=t@example.com",
-            "-c",
-            "commit.gpgsign=false",
-            "-c",
-            "tag.gpgsign=false",
-            *args,
-        ],
+        ["git", *args],
         cwd=repo,
         check=True,
         capture_output=True,
         env={
             **os.environ,
-            "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_CONFIG_GLOBAL": missing,
             "GIT_CONFIG_SYSTEM": missing,
             "GIT_AUTHOR_NAME": "t",
@@ -67,9 +55,6 @@ def repo(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "-q", "-b", "main")
-    _git(repo, "config", "user.name", "t")
-    _git(repo, "config", "user.email", "t@example.com")
-    _git(repo, "config", "commit.gpgsign", "false")
     (repo / ".env").write_text(
         f"ANTHROPIC_KEY={VENDOR_KEY}\nMY_CUSTOM_SECRET={NAMED_SECRET}\n",
         encoding="utf-8",
