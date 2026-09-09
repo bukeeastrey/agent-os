@@ -45,12 +45,18 @@ from agentos.tools.builtin.code_exec import _check_code_destructive
         # Path methods via getattr
         ('from pathlib import Path; getattr(Path("/tmp/x"), "unlink")()', "unlink"),
         ('from pathlib import Path; getattr(Path("/tmp/x"), "rmdir")()', "rmdir"),
-        # Subprocess list invocation of rm
+        # Subprocess list & tuple invocation of rm
         ('import subprocess; subprocess.run(["rm", "-rf", "/tmp/x"])', "subprocess"),
         ('import subprocess as sp; sp.call(["rmdir", "/tmp/x"])', "subprocess"),
+        ('import subprocess; subprocess.run(("rm", "-rf", "/tmp/x"))', "subprocess"),
+        ('import subprocess as sp; sp.call(("rmdir", "/tmp/x"))', "subprocess"),
         # Windows deletion commands in subprocess and os.system
         (
             r'import subprocess; subprocess.run(["cmd.exe", "/c", "del", "C:\\tmp\\x"])',
+            "subprocess",
+        ),
+        (
+            r'import subprocess; subprocess.run(("cmd.exe", "/c", "del", "C:\\tmp\\x"))',
             "subprocess",
         ),
         (

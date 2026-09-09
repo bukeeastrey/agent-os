@@ -27,8 +27,9 @@ from agentos.tools.types import ToolError, current_tool_context
 # shell warnlist hits. Catches the "agent pivots from `rm` to `os.remove()`"
 # bypass. We scan using shallow regex (fast-path) plus AST analysis to catch
 # dynamic evasion (getattr, __import__, importlib, exec/eval, and wildcard imports).
+_COMMAND_PREFIX: str = r"(?:^|[;&|])\s*(?:(?:cmd(?:\.exe)?\s+/[ck]|(?:powershell|pwsh)(?:\.exe)?(?:\s+-[a-zA-Z]+)*)\s+)?"
 _IN_QUOTE_CMD_PREFIX: str = (
-    r"(?:[^'\"]*?[;&|]\s*)?(?:(?:cmd(?:\.exe)?\s+/[ck]|(?:powershell|pwsh)(?:\.exe)?(?:\s+-[a-zA-Z]+)*)\s+)?"
+    r"(?:cmd(?:\.exe)?\s+/[ck]\s+|(?:powershell|pwsh)(?:\.exe)?(?:\s+-[a-zA-Z]+)*\s+)?"
 )
 
 _DESTRUCTIVE_PY_PATTERNS: list[tuple[str, str]] = [
@@ -52,7 +53,7 @@ _DESTRUCTIVE_PY_PATTERNS: list[tuple[str, str]] = [
         "os.popen with delete command",
     ),
     (
-        r"(?i)\bsubprocess\.(?:run|call|Popen|check_output|check_call)\s*\(\s*(?:\[\s*['\"]|['\"])"
+        r"(?i)\bsubprocess\.(?:run|call|Popen|check_output|check_call)\s*\(\s*(?:[\[\(]\s*['\"]|['\"])"
         + _IN_QUOTE_CMD_PREFIX
         + r"(?:rm|rmdir|del|erase|rd|Remove-Item)\b",
         "subprocess invoking delete command",
@@ -68,16 +69,10 @@ _ALL_DESTRUCTIVE_NAMES: frozenset[str] = frozenset(
 _SUBPROCESS_CALL_NAMES: frozenset[str] = frozenset(
     {"run", "call", "Popen", "check_output", "check_call"}
 )
-_SHELL_DELETE_CMDS: frozenset[str] = frozenset(
-    {"rm", "rmdir", "del", "erase", "rd", "remove-item"}
-)
+_SHELL_DELETE_CMDS: frozenset[str] = frozenset({"rm", "rmdir", "del", "erase", "rd", "remove-item"})
 _CMD_WRAPPERS: frozenset[str] = frozenset({"cmd", "cmd.exe"})
 _POWERSHELL_WRAPPERS: frozenset[str] = frozenset(
     {"powershell", "powershell.exe", "pwsh", "pwsh.exe"}
-)
-
-_COMMAND_PREFIX: str = (
-    r"(?:^|[;&|])\s*(?:(?:cmd(?:\.exe)?\s+/[ck]|(?:powershell|pwsh)(?:\.exe)?(?:\s+-[a-zA-Z]+)*)\s+)?"
 )
 _SHELL_DELETE_RE: re.Pattern[str] = re.compile(
     _COMMAND_PREFIX + r"(?:rm|rmdir|del|erase|rd|Remove-Item)\b", re.IGNORECASE
@@ -316,8 +311,7 @@ class _DestructiveCodeVisitor(ast.NodeVisitor):
             if mod == "subprocess" and attr_name in _SUBPROCESS_CALL_NAMES and node.args:
                 if self._subprocess_argv_removes(node.args[0]):
                     self.warning = (
-                        "destructive Python operation detected: "
-                        "subprocess invoking delete command"
+                        "destructive Python operation detected: subprocess invoking delete command"
                     )
                     return
 
@@ -345,9 +339,9 @@ class _DestructiveCodeVisitor(ast.NodeVisitor):
         return None
 
     def _subprocess_argv_removes(self, first_arg: ast.expr) -> bool:
-        """True when a subprocess argv (list or string form) invokes delete commands."""
+        """True when a subprocess argv (list, tuple, or string form) invokes delete commands."""
         aliases = frozenset(self.compile_aliases)
-        if isinstance(first_arg, ast.List):
+        if isinstance(first_arg, (ast.List, ast.Tuple)):
             parts = [_eval_const_str(elt, aliases) for elt in first_arg.elts]
             evaluated = [p for p in parts if p is not None]
             if not evaluated:
