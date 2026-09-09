@@ -32,3 +32,54 @@ class MCPToolDef:
 class MCPToolResult:
     content: str
     is_error: bool = False
+
+
+@dataclass
+class MCPResource:
+    uri: str
+    name: str
+    description: str = ""
+    mime_type: str | None = None
+
+
+MCPResourceDef = MCPResource
+
+
+@dataclass
+class MCPResourceContent:
+    uri: str
+    mime_type: str | None = None
+    text: str | None = None
+    blob: str | None = None
+
+
+@dataclass
+class MCPPromptArgument:
+    name: str
+    description: str = ""
+    required: bool = False
+
+
+@dataclass
+class MCPPrompt:
+    name: str
+    description: str = ""
+    arguments: list[MCPPromptArgument] = field(default_factory=list)
+
+
+MCPPromptDef = MCPPrompt
+
+
+@dataclass
+class MCPPromptMessage:
+    role: str
+    content: str | dict[str, Any]
+
+
+@dataclass
+class MCPGetPromptResult:
+    description: str = ""
+    messages: list[MCPPromptMessage] = field(default_factory=list)
+
+
+MCPPromptResult = MCPGetPromptResult

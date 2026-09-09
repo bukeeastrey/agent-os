@@ -7,7 +7,14 @@ import pytest
 import pytest_asyncio
 
 from agentos.mcp.client import MCPClient
-from agentos.mcp.types import MCPServerConfig, MCPToolDef, MCPToolResult
+from agentos.mcp.types import (
+    MCPGetPromptResult,
+    MCPPrompt,
+    MCPPromptMessage,
+    MCPServerConfig,
+    MCPToolDef,
+    MCPToolResult,
+)
 from agentos.tools.registry import ToolRegistry
 
 
@@ -16,11 +23,13 @@ class FakeMCPClient(MCPClient):
         self,
         config: MCPServerConfig,
         tools: list[MCPToolDef] | None = None,
+        prompts: list[MCPPrompt] | None = None,
         *,
         fail_list: bool = False,
     ) -> None:
         super().__init__(config)
         self.tools = tools or []
+        self.prompts = prompts or []
         self.fail_list = fail_list
         self.connected = False
         self.closed = False
@@ -38,6 +47,17 @@ class FakeMCPClient(MCPClient):
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> MCPToolResult:
         return MCPToolResult(content=f"{name}:{arguments}")
+
+    async def list_prompts(self) -> list[MCPPrompt]:
+        return self.prompts
+
+    async def get_prompt(
+        self, name: str, arguments: dict[str, str] | None = None
+    ) -> MCPGetPromptResult:
+        return MCPGetPromptResult(
+            description=f"Prompt {name}",
+            messages=[MCPPromptMessage(role="user", content=f"Execute prompt {name}")],
+        )
 
 
 @pytest_asyncio.fixture(autouse=True)

@@ -363,6 +363,30 @@ for line in sys.stdin:
         }
     elif method == "tools/call":
         result = {"content": [{"type": "text", "text": message["params"]["arguments"]["text"]}]}
+    elif method == "prompts/list":
+        result = {
+            "prompts": [
+                {
+                    "name": "greet",
+                    "description": "Greet user",
+                    "arguments": [
+                        {"name": "name", "description": "User name", "required": True}
+                    ],
+                }
+            ]
+        }
+    elif method == "prompts/get":
+        name = message["params"]["name"]
+        user_arg = message["params"].get("arguments", {}).get("name", "world")
+        result = {
+            "description": f"Greeting for {name}",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": {"type": "text", "text": f"Hello, {user_arg}!"},
+                }
+            ],
+        }
     else:
         result = {}
     sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": message["id"], "result": result}) + "\\n")
@@ -416,3 +440,33 @@ async def test_concurrent_tool_calls_serialized_safely(tmp_path: Path) -> None:
     assert len(results) == 10
     assert [r.content for r in results] == [f"msg-{i}" for i in range(10)]
     assert all(not r.is_error for r in results)
+
+
+@pytest.mark.asyncio
+async def test_list_and_get_prompts_from_stdio_server(tmp_path: Path) -> None:
+    """MCPStdioClient supports listing and getting MCP prompts."""
+    server = tmp_path / "server.py"
+    server.write_text(_SPEC_COMPLIANT_SERVER)
+    client = MCPStdioClient(
+        MCPServerConfig(name="demo", transport="stdio", command=sys.executable, args=[str(server)])
+    )
+
+    try:
+        await client.connect()
+        prompts = await client.list_prompts()
+        prompt_result = await client.get_prompt("greet", {"name": "Alice"})
+    finally:
+        await client.close()
+
+    assert len(prompts) == 1
+    assert prompts[0].name == "greet"
+    assert prompts[0].description == "Greet user"
+    assert len(prompts[0].arguments) == 1
+    assert prompts[0].arguments[0].name == "name"
+    assert prompts[0].arguments[0].description == "User name"
+    assert prompts[0].arguments[0].required is True
+
+    assert prompt_result.description == "Greeting for greet"
+    assert len(prompt_result.messages) == 1
+    assert prompt_result.messages[0].role == "user"
+    assert prompt_result.messages[0].content == "Hello, Alice!"

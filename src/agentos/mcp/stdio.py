@@ -9,7 +9,15 @@ from typing import Any, cast
 
 from agentos import __version__
 from agentos.mcp.client import MCPClient
-from agentos.mcp.types import MCPServerConfig, MCPToolDef, MCPToolResult
+from agentos.mcp.types import (
+    MCPGetPromptResult,
+    MCPPrompt,
+    MCPPromptArgument,
+    MCPPromptMessage,
+    MCPServerConfig,
+    MCPToolDef,
+    MCPToolResult,
+)
 
 
 class MCPStdioClient(MCPClient):
@@ -228,4 +236,59 @@ class MCPStdioClient(MCPClient):
         result = response.get("result", {})
         content_list = result.get("content", [])
         text = "\n".join(c.get("text", "") for c in content_list if c.get("type") == "text")
-        return MCPToolResult(content=text)
+        return MCPToolResult(content=text, is_error=bool(result.get("isError", False)))
+
+    async def list_prompts(self) -> list[MCPPrompt]:
+        """List prompts from the MCP server."""
+        response = await self._send_request("prompts/list")
+        if "error" in response:
+            return []
+        prompts_data = response.get("result", {}).get("prompts", [])
+        prompts: list[MCPPrompt] = []
+        for p in prompts_data:
+            args = [
+                MCPPromptArgument(
+                    name=arg.get("name", ""),
+                    description=arg.get("description", ""),
+                    required=bool(arg.get("required", False)),
+                )
+                for arg in p.get("arguments", [])
+            ]
+            prompts.append(
+                MCPPrompt(
+                    name=p.get("name", ""),
+                    description=p.get("description", ""),
+                    arguments=args,
+                )
+            )
+        return prompts
+
+    async def get_prompt(
+        self, name: str, arguments: dict[str, str] | None = None
+    ) -> MCPGetPromptResult:
+        """Get a prompt by name from the MCP server."""
+        params: dict[str, Any] = {"name": name}
+        if arguments is not None:
+            params["arguments"] = arguments
+        response = await self._send_request("prompts/get", params)
+        if "error" in response:
+            return MCPGetPromptResult(description="", messages=[])
+        result = response.get("result", {})
+        messages_data = result.get("messages", [])
+        messages: list[MCPPromptMessage] = []
+        for msg in messages_data:
+            content_raw = msg.get("content", "")
+            if isinstance(content_raw, dict) and content_raw.get("type") == "text":
+                content = content_raw.get("text", "")
+            else:
+                content = content_raw
+            messages.append(
+                MCPPromptMessage(
+                    role=msg.get("role", "user"),
+                    content=content,
+                )
+            )
+        return MCPGetPromptResult(
+            description=result.get("description", ""),
+            messages=messages,
+        )

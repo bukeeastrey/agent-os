@@ -10,11 +10,33 @@ from agentos.mcp.discovery import (
     disconnect_and_unregister,
     discover_and_register,
 )
-from agentos.mcp.types import MCPServerConfig, MCPToolDef, MCPToolResult
+from agentos.mcp.types import (
+    MCPGetPromptResult,
+    MCPPrompt,
+    MCPPromptArgument,
+    MCPPromptDef,
+    MCPPromptMessage,
+    MCPPromptResult,
+    MCPResource,
+    MCPResourceContent,
+    MCPResourceDef,
+    MCPServerConfig,
+    MCPToolDef,
+    MCPToolResult,
+)
 
 __all__ = [
     "ActiveMCPClient",
     "MCPClient",
+    "MCPGetPromptResult",
+    "MCPPrompt",
+    "MCPPromptArgument",
+    "MCPPromptDef",
+    "MCPPromptMessage",
+    "MCPPromptResult",
+    "MCPResource",
+    "MCPResourceContent",
+    "MCPResourceDef",
     "MCPServerConfig",
     "MCPToolDef",
     "MCPToolResult",

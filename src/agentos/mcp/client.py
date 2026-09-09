@@ -9,7 +9,15 @@ from abc import ABC, abstractmethod
 from contextlib import AsyncExitStack
 from typing import Any
 
-from agentos.mcp.types import MCPServerConfig, MCPToolDef, MCPToolResult
+from agentos.mcp.types import (
+    MCPGetPromptResult,
+    MCPPrompt,
+    MCPPromptArgument,
+    MCPPromptMessage,
+    MCPServerConfig,
+    MCPToolDef,
+    MCPToolResult,
+)
 
 
 class MCPClient(ABC):
@@ -33,6 +41,16 @@ class MCPClient(ABC):
     @abstractmethod
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> MCPToolResult:
         """Call a tool on the MCP server."""
+
+    @abstractmethod
+    async def list_prompts(self) -> list[MCPPrompt]:
+        """List available prompts from the MCP server."""
+
+    @abstractmethod
+    async def get_prompt(
+        self, name: str, arguments: dict[str, str] | None = None
+    ) -> MCPGetPromptResult:
+        """Get a prompt by name from the MCP server."""
 
 
 class MCPSessionClient(MCPClient):
@@ -203,4 +221,57 @@ class MCPSessionClient(MCPClient):
         return MCPToolResult(
             content="\n".join(chunks),
             is_error=bool(getattr(result, "isError", False)),
+        )
+
+    async def list_prompts(self) -> list[MCPPrompt]:
+        """List prompts from the MCP server."""
+        result = await self._require_session().list_prompts()
+        prompts: list[MCPPrompt] = []
+        for p in result.prompts:
+            args = [
+                MCPPromptArgument(
+                    name=arg.name,
+                    description=getattr(arg, "description", "") or "",
+                    required=bool(getattr(arg, "required", False)),
+                )
+                for arg in (p.arguments or [])
+            ]
+            prompts.append(
+                MCPPrompt(
+                    name=p.name,
+                    description=getattr(p, "description", "") or "",
+                    arguments=args,
+                )
+            )
+        return prompts
+
+    async def get_prompt(
+        self, name: str, arguments: dict[str, str] | None = None
+    ) -> MCPGetPromptResult:
+        """Get a prompt from the MCP server by name."""
+        result = await self._require_session().get_prompt(name, arguments)
+        messages: list[MCPPromptMessage] = []
+        for msg in result.messages:
+            content: str | dict[str, Any]
+            msg_content = getattr(msg, "content", None)
+            text_val = getattr(msg_content, "text", None)
+            model_dump_fn = getattr(msg_content, "model_dump", None)
+            if isinstance(text_val, str):
+                content = text_val
+            elif callable(model_dump_fn):
+                dumped = model_dump_fn()
+                content = dumped if isinstance(dumped, dict) else str(dumped)
+            elif isinstance(msg_content, (str, dict)):
+                content = msg_content
+            else:
+                content = str(msg_content) if msg_content is not None else ""
+            messages.append(
+                MCPPromptMessage(
+                    role=str(getattr(msg, "role", "user")),
+                    content=content,
+                )
+            )
+        return MCPGetPromptResult(
+            description=getattr(result, "description", "") or "",
+            messages=messages,
         )
