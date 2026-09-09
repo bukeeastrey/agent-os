@@ -187,7 +187,11 @@ def _expand_env_vars(text: str) -> str:
     if "$" not in text and "%" not in text:
         return text
     try:
-        return os.path.expandvars(text)
+        expanded = os.path.expandvars(text)
+        if ("$HOME" in expanded or "${HOME}" in expanded) and "HOME" not in os.environ:
+            home = os.environ.get("USERPROFILE") or str(Path.home())
+            expanded = expanded.replace("${HOME}", home).replace("$HOME", home)
+        return expanded
     except (KeyError, TypeError, ValueError):
         return text
 

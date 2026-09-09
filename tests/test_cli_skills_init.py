@@ -167,7 +167,7 @@ def test_init_fails_on_existing_files_without_force(
         ],
     )
     assert result2.exit_code == 1
-    assert "already exists" in result2.output
+    assert "already exists" in " ".join(result2.output.split())
 
 
 def test_init_overwrites_with_force(temp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
