@@ -76,6 +76,16 @@ from agentos.tools.builtin.code_exec import _check_code_destructive
         (r'import os; os.system("rd /s /q C:\\tmp\\x")', "os.system"),
         (r'import os; os.system("powershell Remove-Item C:\\tmp\\x")', "os.system"),
         (r'import os; os.popen("del C:\\tmp\\x")', "os.popen"),
+        # Prefixed command deletion calls (sudo, env, nohup, time, nice, xargs)
+        ('import subprocess; subprocess.run(["sudo", "rm", "-rf", "/etc"])', "subprocess"),
+        ('import os; os.system("sudo rm -rf /etc")', "os.system"),
+        ('import subprocess; subprocess.run("sudo rm -rf /etc", shell=True)', "subprocess"),
+        ('import os; os.system("env FOO=1 rm -rf /etc")', "os.system"),
+        ('import subprocess; subprocess.run(["env", "rm", "-rf", "/etc"])', "subprocess"),
+        ('import subprocess; subprocess.run(["xargs", "rm", "-rf"])', "subprocess"),
+        ('import os; os.system("time rm -rf /etc")', "os.system"),
+        ('import os; os.system("nice rm -rf /etc")', "os.system"),
+        ('import subprocess; subprocess.run(["nohup", "rm", "-rf", "/etc"])', "subprocess"),
     ],
 )
 def test_destructive_ast_evasions_detected(code: str, expected_keyword: str) -> None:
@@ -172,6 +182,7 @@ def test_syntax_error_code_falls_back_to_regex() -> None:
             "exec(compile('getattr(os, \"sys\" + \"tem\")(\"rm -rf /etc/x\")', '', 'exec'))",
             "os.system",
         ),
+        ('import os; getattr(os, "sys" + "tem")("sudo rm -rf /etc")', "os.system"),
     ],
 )
 def test_indirect_destructive_calls_detected(code: str, expected_keyword: str) -> None:

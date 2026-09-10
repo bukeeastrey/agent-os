@@ -27,13 +27,22 @@ from agentos.tools.types import ToolError, current_tool_context
 # shell warnlist hits. Catches the "agent pivots from `rm` to `os.remove()`"
 # bypass. We scan using shallow regex (fast-path) plus AST analysis to catch
 # dynamic evasion (getattr, __import__, importlib, exec/eval, and wildcard imports).
-_COMMAND_PREFIX: str = (
-    r"(?:^|[;&|])\s*"
-    r"(?:(?:cmd(?:\.exe)?\s+/[ck]|(?:powershell|pwsh)(?:\.exe)?(?:\s+-[a-zA-Z]+)*)\s+)?"
+_PREFIX_CMD_PATTERN: str = (
+    r"(?:"
+    r"cmd(?:\.exe)?\s+/[ck]"
+    r"|(?:powershell|pwsh)(?:\.exe)?(?:\s+-[a-zA-Z0-9]+)*"
+    r"|sudo(?:\s+-[a-zA-Z0-9]+(?:\s+\S+)?)*"
+    r"|doas(?:\s+-[a-zA-Z0-9]+(?:\s+\S+)?)*"
+    r"|env(?:\s+-[a-zA-Z0-9]+)*(?:\s+[a-zA-Z_][a-zA-Z0-9_]*=\S*)*"
+    r"|nice(?:\s+-[a-zA-Z0-9]+(?:\s+\S+)?)*"
+    r"|time(?:\s+-[a-zA-Z0-9]+)*"
+    r"|timeout(?:\s+-[a-zA-Z0-9]+)*(?:\s+\d+[a-zA-Z]?)?"
+    r"|xargs(?:\s+-[a-zA-Z0-9]+(?:\s+\S+)?)*"
+    r"|nohup"
+    r")"
 )
-_IN_QUOTE_CMD_PREFIX: str = (
-    r"(?:cmd(?:\.exe)?\s+/[ck]\s+|(?:powershell|pwsh)(?:\.exe)?(?:\s+-[a-zA-Z]+)*\s+)?"
-)
+_IN_QUOTE_CMD_PREFIX: str = r"(?:" + _PREFIX_CMD_PATTERN + r"\s+)*"
+_COMMAND_PREFIX: str = r"(?:^|[;&|])\s*" + _IN_QUOTE_CMD_PREFIX
 
 _DESTRUCTIVE_PY_PATTERNS: list[tuple[str, str]] = [
     (r"\bos\.remove\s*\(", "os.remove()"),
@@ -73,9 +82,42 @@ _SUBPROCESS_CALL_NAMES: frozenset[str] = frozenset(
     {"run", "call", "Popen", "check_output", "check_call"}
 )
 _SHELL_DELETE_CMDS: frozenset[str] = frozenset({"rm", "rmdir", "del", "erase", "rd", "remove-item"})
-_CMD_WRAPPERS: frozenset[str] = frozenset({"cmd", "cmd.exe"})
-_POWERSHELL_WRAPPERS: frozenset[str] = frozenset(
-    {"powershell", "powershell.exe", "pwsh", "pwsh.exe"}
+_PREFIX_COMMANDS: frozenset[str] = frozenset(
+    {
+        "sudo",
+        "doas",
+        "env",
+        "nohup",
+        "time",
+        "nice",
+        "xargs",
+        "timeout",
+        "cmd",
+        "cmd.exe",
+        "powershell",
+        "powershell.exe",
+        "pwsh",
+        "pwsh.exe",
+    }
+)
+_PREFIX_TAKES_ARG: frozenset[str] = frozenset(
+    {
+        "-u",
+        "-g",
+        "-p",
+        "-h",
+        "-n",
+        "-s",
+        "-k",
+        "-a",
+        "-d",
+        "-e",
+        "-i",
+        "-l",
+        "--user",
+        "--group",
+        "--priority",
+    }
 )
 _SHELL_DELETE_RE: re.Pattern[str] = re.compile(
     _COMMAND_PREFIX + r"(?:rm|rmdir|del|erase|rd|Remove-Item)\b", re.IGNORECASE
@@ -349,16 +391,24 @@ class _DestructiveCodeVisitor(ast.NodeVisitor):
             evaluated = [p for p in parts if p is not None]
             if not evaluated:
                 return False
-            cmd0 = evaluated[0].lower().strip()
-            if cmd0 in _SHELL_DELETE_CMDS:
-                return True
-            if cmd0 in _CMD_WRAPPERS or cmd0 in _POWERSHELL_WRAPPERS:
-                for part in evaluated[1:]:
-                    token = part.lower().strip()
-                    if token in _SHELL_DELETE_CMDS:
-                        return True
-                    if _SHELL_DELETE_RE.search(part):
-                        return True
+            idx = 0
+            while idx < len(evaluated):
+                token = evaluated[idx].lower().strip()
+                if token in _PREFIX_COMMANDS:
+                    idx += 1
+                    continue
+                if token in _PREFIX_TAKES_ARG and idx + 1 < len(evaluated):
+                    idx += 2
+                    continue
+                if token.startswith("-") or token.startswith("/"):
+                    idx += 1
+                    continue
+                if "=" in token and not token.startswith("="):
+                    idx += 1
+                    continue
+                if token in _SHELL_DELETE_CMDS or _SHELL_DELETE_RE.search(evaluated[idx]):
+                    return True
+                return False
             return False
         cmd_str = _eval_const_str(first_arg, aliases)
         return bool(cmd_str and _SHELL_DELETE_RE.search(cmd_str))
