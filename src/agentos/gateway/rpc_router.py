@@ -199,6 +199,7 @@ async def _handle_router_hold_get(params: dict | None, ctx: RpcContext) -> dict[
                 "model": target.model,
                 "provider": target.provider,
                 "description": target.description,
+                "pinnable": target.pinnable,
             }
             for target in build_router_control_targets(cfg)
             if target.target_type == "tier"

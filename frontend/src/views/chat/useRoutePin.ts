@@ -26,6 +26,7 @@ import '@/i18n/en/chat'
 export interface RoutePinTier {
   tier: string
   model: string
+  pinnable?: boolean
 }
 
 /** One directly-pinnable model from the active provider's catalog. */
@@ -299,9 +300,11 @@ export function useRoutePin(
   const effectiveTiers = useMemo(() => {
     if (live.tiers.length > 0) return live.tiers
     if (!tierConfigs) return EMPTY_TIERS
-    return Object.entries(tierConfigs)
-      .filter(([, cfg]) => !cfg.imageOnly)
-      .map(([tier, cfg]) => ({ tier, model: cfg.model || '' }))
+    return Object.entries(tierConfigs).map(([tier, cfg]) => ({
+      tier,
+      model: cfg.model || '',
+      pinnable: !cfg.imageOnly,
+    }))
   }, [live.tiers, tierConfigs])
 
   return {

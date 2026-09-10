@@ -45,6 +45,7 @@ class RouterControlTarget:
     provider: str | None = None
     description: str | None = None
     thinking_level: str | None = None
+    pinnable: bool = True
 
 
 @dataclass
@@ -97,11 +98,11 @@ def _text_tiers(router_cfg: object | None) -> dict[str, dict[str, Any]]:
 
 
 def build_router_control_targets(router_cfg: object | None) -> list[RouterControlTarget]:
-    """Return canonical text targets derived only from active router tiers."""
+    """Return canonical targets derived only from active router tiers."""
 
     targets: list[RouterControlTarget] = []
-    text_tiers = _text_tiers(router_cfg)
-    for tier, cfg in text_tiers.items():
+    tiers = normalize_tier_mapping(_router_tiers(router_cfg))
+    for tier, cfg in tiers.items():
         model = str(cfg.get("model") or "").strip()
         if not model:
             continue
@@ -116,6 +117,7 @@ def build_router_control_targets(router_cfg: object | None) -> list[RouterContro
                 provider=provider,
                 description=str(cfg.get("description") or "").strip() or None,
                 thinking_level=str(thinking).strip() if thinking is not None else None,
+                pinnable=not bool(cfg.get("image_only", False)),
             )
         )
 
@@ -129,12 +131,16 @@ def resolve_router_control_target(
     normalized = normalize_target_id(target_id)
     if not normalized:
         raise RouterControlValidationError("router_control target_id is required")
-    targets = {target.target_id: target for target in build_router_control_targets(router_cfg)}
+    targets = {
+        target.target_id: target
+        for target in build_router_control_targets(router_cfg)
+        if target.pinnable
+    }
     try:
         return targets[normalized]
     except KeyError as exc:
         raise RouterControlValidationError(
-            f"router_control target_id {normalized!r} is not configured"
+            f"router_control target_id {normalized!r} is not configured or not pinnable"
         ) from exc
 
 

@@ -304,7 +304,10 @@ describe('useRoutePin', () => {
       }),
     )
 
-    // image_only tiers are not pinnable text routes and must not be offered.
-    expect(result.current.tiers).toEqual([{ tier: 'c1', model: 'gpt-5.6-luna' }])
+    // image_only tiers are included as non-pinnable so the route picker can show them.
+    expect(result.current.tiers).toEqual([
+      { tier: 'c1', model: 'gpt-5.6-luna', pinnable: true },
+      { tier: 'image_model', model: 'minimax-m3', pinnable: false },
+    ])
   })
 })

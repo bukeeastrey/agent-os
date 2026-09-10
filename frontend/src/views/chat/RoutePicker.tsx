@@ -45,6 +45,7 @@ interface Row {
   key: string
   primary: string
   secondary: string
+  disabled?: boolean
 }
 
 export function RoutePicker({ route }: RoutePickerProps) {
@@ -108,7 +109,8 @@ export function RoutePicker({ route }: RoutePickerProps) {
       value: row.tier,
       key: `t:${row.tier}`,
       primary: row.tier,
-      secondary: row.model,
+      secondary: row.pinnable === false ? `${row.model} · ${t('chat.routeImageOnly')}` : row.model,
+      disabled: row.pinnable === false,
     }))
     // Models already offered as a tier are dropped: the tier row pins the same
     // model AND carries its configured thinking level, so it is strictly the
@@ -215,6 +217,8 @@ export function RoutePicker({ route }: RoutePickerProps) {
                     type="button"
                     role="option"
                     aria-selected={row.key === selectedKey}
+                    aria-disabled={row.disabled}
+                    disabled={row.disabled}
                     className="chat-route-option"
                     onClick={() => choose(row.kind, row.value)}
                   >

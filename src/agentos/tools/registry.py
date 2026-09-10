@@ -111,7 +111,7 @@ class ToolRegistry:
             target_ids = [
                 target.target_id
                 for target in build_router_control_targets(router_cfg)
-                if target.target_type == "tier"
+                if target.target_type == "tier" and target.pinnable
             ]
         except Exception:  # noqa: BLE001 - schema enrichment must not hide the tool
             return parameters

@@ -184,6 +184,7 @@ export const chat = defineNamespace('chat', {
   routeImageOverride: 'image route',
   routeImageOverrideTitle:
     'This turn used the image tier: image turns are routed before the pin is applied',
+  routeImageOnly: 'used automatically for images',
 
   // Transcript wiring.
   attachmentsPrompt: 'Describe these attachments',
