@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import csv
 import fnmatch
 import functools
@@ -11,7 +12,10 @@ import json
 import os
 import posixpath
 import re
+import sys
+import threading
 import zipfile
+from collections.abc import Iterator
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -589,12 +593,80 @@ async def read_spreadsheet(
     )
 
 
+_CSV_FIELD_SIZE_LOCK = threading.Lock()
+_CSV_ACTIVE_DEMANDS: dict[int, int] = {}
+_CSV_BASELINE_LIMIT: int | None = None
+_CSV_DEMAND_COUNTER = 0
+
+
+def _safe_csv_field_size_limit(limit: int) -> int:
+    """Safely apply a field size limit, guarding against platform integer overflow."""
+    target = min(limit, sys.maxsize)
+    try:
+        return csv.field_size_limit(target)
+    except OverflowError:
+        fallback = min(target, 2_147_483_647)
+        return csv.field_size_limit(fallback)
+
+
+@contextlib.contextmanager
+def _scoped_csv_field_size_limit(required_limit: int) -> Iterator[None]:
+    """Temporarily adjust process-global csv.field_size_limit to accommodate large fields.
+
+    Thread-safe and concurrency-friendly:
+    - If required_limit <= baseline, no lock is held and the global limit is not touched.
+    - Multiple concurrent readers requiring raised limits run in parallel: the global limit
+      is set to the maximum of all active demands, and restored to baseline once all
+      active readers complete.
+    - Locks are only held during limit calculation, never during file parsing.
+    """
+    global _CSV_BASELINE_LIMIT, _CSV_DEMAND_COUNTER
+
+    current = csv.field_size_limit()
+    if required_limit <= current and not _CSV_ACTIVE_DEMANDS:
+        yield
+        return
+
+    demand_id: int | None = None
+    with _CSV_FIELD_SIZE_LOCK:
+        if _CSV_BASELINE_LIMIT is None:
+            _CSV_BASELINE_LIMIT = csv.field_size_limit()
+
+        if required_limit > _CSV_BASELINE_LIMIT:
+            _CSV_DEMAND_COUNTER += 1
+            demand_id = _CSV_DEMAND_COUNTER
+            _CSV_ACTIVE_DEMANDS[demand_id] = required_limit
+            highest = max(_CSV_ACTIVE_DEMANDS.values())
+            if highest > csv.field_size_limit():
+                _safe_csv_field_size_limit(highest)
+
+    try:
+        yield
+    finally:
+        if demand_id is not None:
+            with _CSV_FIELD_SIZE_LOCK:
+                _CSV_ACTIVE_DEMANDS.pop(demand_id, None)
+                if _CSV_ACTIVE_DEMANDS:
+                    highest = max(max(_CSV_ACTIVE_DEMANDS.values()), _CSV_BASELINE_LIMIT or 0)
+                    _safe_csv_field_size_limit(highest)
+                else:
+                    if _CSV_BASELINE_LIMIT is not None:
+                        _safe_csv_field_size_limit(_CSV_BASELINE_LIMIT)
+                        _CSV_BASELINE_LIMIT = None
+
+
 def _read_delimited_rows(path: Path, delimiter: str) -> list[tuple[str, dict[int, list[str]], int]]:
     try:
         text = path.read_text(encoding="utf-8-sig")
     except UnicodeDecodeError as exc:
         raise ToolError(f"Cannot read spreadsheet as UTF-8 text: {path}") from exc
-    parsed = [list(row) for row in csv.reader(io.StringIO(text), delimiter=delimiter)]
+
+    with _scoped_csv_field_size_limit(len(text)):
+        try:
+            parsed = [list(row) for row in csv.reader(io.StringIO(text), delimiter=delimiter)]
+        except csv.Error as exc:
+            raise ToolError(f"Cannot parse delimited spreadsheet {path}: {exc}") from exc
+
     rows = dict(enumerate(parsed, start=1))
     return [(path.name, rows, len(parsed))]
 
