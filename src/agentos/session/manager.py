@@ -843,7 +843,7 @@ class SessionManager:
                 "session.task_cancel_failed", session_key=session_key, reason=reason
             )
 
-    async def delete(self, session_key: str) -> None:
+    async def delete(self, session_key: str, *, retain_compacted: bool = False) -> None:
         """Remove a session: cancel its tasks, evict runtime state, then delete.
 
         The single removal choke point for maintenance paths. Ordering matters:
@@ -854,7 +854,7 @@ class SessionManager:
         session_key = canonicalize_session_key(session_key)
         await self._cancel_task_runtime(session_key, reason="session_delete")
         evict_session_runtime_state(session_key)
-        await self._storage.delete_session(session_key)
+        await self._storage.delete_session(session_key, retain_compacted=retain_compacted)
 
     async def branch(
         self,
@@ -1540,7 +1540,7 @@ class SessionManager:
 
     # ── Maintenance ──────────────────────────────────────────────────────────
 
-    async def prune_stale(self, max_age_ms: int) -> int:
+    async def prune_stale(self, max_age_ms: int, *, retain_compacted: bool = False) -> int:
         """Delete sessions older than max_age_ms. Returns number pruned.
 
         The keys are collected up front rather than delegating to
@@ -1551,10 +1551,12 @@ class SessionManager:
         cutoff = _now_ms() - max_age_ms
         session_keys = await self._storage.list_stale_session_keys(cutoff)
         for session_key in session_keys:
-            await self.delete(session_key)
+            await self.delete(session_key, retain_compacted=retain_compacted)
         return len(session_keys)
 
-    async def cap_entries(self, max_entries: int = 500) -> int:
+    async def cap_entries(
+        self, max_entries: int = 500, *, retain_compacted: bool = False
+    ) -> int:
         """Delete oldest sessions beyond max_entries. Returns number deleted."""
         total = await self._storage.count_sessions()
         if total <= max_entries:
@@ -1563,7 +1565,7 @@ class SessionManager:
         # sorted by updated_at asc — oldest first
         to_delete = sorted(sessions, key=lambda s: s.updated_at)[: total - max_entries]
         for s in to_delete:
-            await self.delete(s.session_key)
+            await self.delete(s.session_key, retain_compacted=retain_compacted)
         return len(to_delete)
 
     async def archive(self, session_key: str) -> None:

@@ -724,7 +724,9 @@ class SessionStorage:
         return [SessionNode(**_deserialize_row(dict(r))) for r in rows]
 
     @_serialized_write
-    async def delete_session(self, session_key: str) -> None:
+    async def delete_session(
+        self, session_key: str, *, retain_compacted: bool = False
+    ) -> None:
         session_key = canonicalize_session_key(session_key)
         session = await self.get_session(session_key)
         if session is None:
@@ -739,14 +741,15 @@ class SessionStorage:
                 "DELETE FROM transcript_entries WHERE session_id = ?",
                 (session.session_id,),
             )
-            await self.conn.execute(
-                "DELETE FROM compacted_transcript_entries WHERE session_id = ?",
-                (session.session_id,),
-            )
-            await self.conn.execute(
-                "DELETE FROM session_summaries WHERE session_id = ?",
-                (session.session_id,),
-            )
+            if not retain_compacted:
+                await self.conn.execute(
+                    "DELETE FROM compacted_transcript_entries WHERE session_id = ?",
+                    (session.session_id,),
+                )
+                await self.conn.execute(
+                    "DELETE FROM session_summaries WHERE session_id = ?",
+                    (session.session_id,),
+                )
             await self.conn.execute(
                 "DELETE FROM session_context_states WHERE session_id = ?",
                 (session.session_id,),
@@ -779,7 +782,9 @@ class SessionStorage:
             rows = await cur.fetchall()
         return [row[0] for row in rows]
 
-    async def prune_stale_sessions(self, before_ms: int) -> int:
+    async def prune_stale_sessions(
+        self, before_ms: int, *, retain_compacted: bool = False
+    ) -> int:
         """Delete sessions not updated since before_ms epoch ms. Returns count deleted.
 
         Storage-only: it does not evict the process-global runtime state keyed
@@ -787,7 +792,7 @@ class SessionStorage:
         """
         session_keys = await self.list_stale_session_keys(before_ms)
         for session_key in session_keys:
-            await self.delete_session(session_key)
+            await self.delete_session(session_key, retain_compacted=retain_compacted)
         return len(session_keys)
 
     async def count_sessions(self) -> int:

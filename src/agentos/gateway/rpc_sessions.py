@@ -1962,11 +1962,13 @@ async def _handle_sessions_delete(params: dict | None, ctx: RpcContext) -> dict:
 
     # Support both single key and bulk keys
     keys: list[str] = []
+    retain_compacted = False
     if isinstance(params, dict):
         if "keys" in params:
             keys = params["keys"]
         elif "key" in params:
             keys = [params["key"]]
+        retain_compacted = bool(params.get("retain_compacted", False))
 
     if not keys:
         raise ValueError("params.key or params.keys is required")
@@ -1998,7 +2000,7 @@ async def _handle_sessions_delete(params: dict | None, ctx: RpcContext) -> dict:
                 except Exception:
                     log.warning("sessions.delete.task_cancel_failed", session_key=canonical)
             evict_session_runtime_state(canonical)
-            await storage.delete_session(canonical)
+            await storage.delete_session(canonical, retain_compacted=retain_compacted)
             deleted.append(k)
         except Exception as exc:
             errors.append(f"{k}: {exc}")
