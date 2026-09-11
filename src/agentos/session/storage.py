@@ -146,6 +146,9 @@ _CREATE_UNIQUE_IDX_PROJECTS_NAME = (
 _CREATE_IDX_SESSIONS_PROJECT = (
     "CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id)"
 )
+_CREATE_IDX_SESSIONS_SESSION_ID = (
+    "CREATE INDEX IF NOT EXISTS idx_sessions_session_id ON sessions(session_id)"
+)
 
 _CREATE_TRANSCRIPT = """
 CREATE TABLE IF NOT EXISTS transcript_entries (
@@ -499,6 +502,7 @@ class SessionStorage:
         await self._conn.execute(_CREATE_IDX_MEMORY_DURABLE_RECEIPTS_COVERAGE)
         await self._conn.commit()
         await self._ensure_projects_name_index()
+        await self._ensure_sessions_session_id_index()
         await self.mark_abandoned_agent_tasks()
 
     async def _migrate_epoch_column(self) -> None:
@@ -649,6 +653,15 @@ class SessionStorage:
         except aiosqlite.IntegrityError:
             await self._conn.rollback()
             log.warning("projects name index skipped: duplicate names already exist")
+
+    async def _ensure_sessions_session_id_index(self) -> None:
+        """Create the session_id index on sessions if the column exists."""
+        assert self._conn is not None
+        async with self._conn.execute("PRAGMA table_info(sessions)") as cur:
+            columns = {row[1] for row in await cur.fetchall()}
+        if "session_id" in columns:
+            await self._conn.execute(_CREATE_IDX_SESSIONS_SESSION_ID)
+            await self._conn.commit()
 
     @property
     def conn(self) -> Any:
