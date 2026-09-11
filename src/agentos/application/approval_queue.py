@@ -188,7 +188,11 @@ class ApprovalQueue:
             if entry.resolved:
                 return entry.approved
 
-        if time.time() - entry.created_at < self._timeout:
+        if (
+            timeout is not None
+            and timeout < self._timeout
+            and time.time() - entry.created_at < self._timeout
+        ):
             # The caller's own timeout elapsed, but the approval's overall
             # lifespan (created_at + default_timeout) hasn't -- leave it
             # pending instead of denying it, so a human operator can still
