@@ -26,6 +26,43 @@ from agentos.session.models import (
 log = logging.getLogger(__name__)
 
 
+class _AsyncReentrantLock:
+    """Async reentrant lock bound to asyncio.current_task()."""
+
+    def __init__(self) -> None:
+        self._lock = asyncio.Lock()
+        self._owner: asyncio.Task[Any] | None = None
+        self._depth = 0
+
+    async def acquire(self) -> None:
+        current_task = asyncio.current_task()
+        if self._owner is not None and self._owner is current_task:
+            self._depth += 1
+            return
+        await self._lock.acquire()
+        self._owner = current_task
+        self._depth = 1
+
+    def release(self) -> None:
+        current_task = asyncio.current_task()
+        if self._owner is not current_task:
+            raise RuntimeError("Cannot release un-owned lock")
+        self._depth -= 1
+        if self._depth == 0:
+            self._owner = None
+            self._lock.release()
+
+    def locked(self) -> bool:
+        return self._lock.locked()
+
+    async def __aenter__(self) -> _AsyncReentrantLock:
+        await self.acquire()
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self.release()
+
+
 def _serialized_write[**P, R](
     method: Callable[Concatenate[SessionStorage, P], Awaitable[R]],
 ) -> Callable[Concatenate[SessionStorage, P], Awaitable[R]]:
@@ -439,7 +476,7 @@ class SessionStorage:
     ) -> None:
         self._db_path = db_path
         self._conn: Any | None = None
-        self._write_lock = asyncio.Lock()
+        self._write_lock = _AsyncReentrantLock()
 
     async def connect(self) -> None:
         self._conn = await aiosqlite.connect(self._db_path)
@@ -459,6 +496,7 @@ class SessionStorage:
             await self._conn.close()
             self._conn = None
 
+    @_serialized_write
     async def _initialize_schema(self) -> None:
         assert self._conn is not None
         await self._conn.execute(_CREATE_SESSIONS)

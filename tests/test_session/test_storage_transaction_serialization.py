@@ -147,3 +147,50 @@ async def test_failed_write_rolls_back_before_releasing_serialization_lock() -> 
         assert await storage.count_sessions() == 1
     finally:
         await storage.close()
+
+
+async def test_initialize_schema_holds_write_lock() -> None:
+    storage = SessionStorage(":memory:")
+    lock_was_held = False
+    original_migrate = storage._migrate_epoch_column
+
+    async def checked_migrate() -> None:
+        nonlocal lock_was_held
+        lock_was_held = storage._write_lock.locked()
+        await original_migrate()
+
+    storage._migrate_epoch_column = checked_migrate  # type: ignore[method-assign]
+    try:
+        await storage.connect()
+        assert lock_was_held is True
+    finally:
+        await storage.close()
+
+
+async def test_reentrant_serialized_write_does_not_deadlock() -> None:
+    storage = SessionStorage(":memory:")
+    try:
+        await storage.connect()
+        async with storage._write_lock:
+            abandoned = await storage.mark_abandoned_agent_tasks()
+            assert isinstance(abandoned, int)
+    finally:
+        await storage.close()
+
+
+async def test_concurrent_initialize_schema_serialized() -> None:
+    storage = SessionStorage(":memory:")
+    try:
+        await storage.connect()
+        results = await asyncio.gather(
+            storage._initialize_schema(),
+            storage._initialize_schema(),
+            storage._initialize_schema(),
+            return_exceptions=True,
+        )
+        for res in results:
+            assert not isinstance(res, Exception), f"Unexpected exception: {res}"
+
+        assert await storage.count_sessions() == 0
+    finally:
+        await storage.close()
