@@ -395,6 +395,11 @@ def _serialize(value: Any) -> Any:
     return value
 
 
+def _escape_like(value: str) -> str:
+    """Escape SQLite LIKE wildcards (%, _, \\) for exact literal matching."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def _deserialize_row(row: dict[str, Any]) -> dict[str, Any]:
     """Deserialize JSON text fields back to Python objects."""
     json_fields = {
@@ -1647,8 +1652,8 @@ class SessionStorage:
         clauses = ["flush_receipt_status IN ('degraded_forensic', 'failed_retryable')"]
         params: list[Any] = []
         if session_key_prefix:
-            clauses.append("session_key LIKE ?")
-            params.append(f"{session_key_prefix}%")
+            clauses.append("session_key LIKE ? ESCAPE '\\'")
+            params.append(f"{_escape_like(session_key_prefix)}%")
         params.append(limit)
         sql = (
             "SELECT * FROM session_summaries "
