@@ -86,6 +86,17 @@ from agentos.tools.builtin.code_exec import _check_code_destructive
         ('import os; os.system("time rm -rf /etc")', "os.system"),
         ('import os; os.system("nice rm -rf /etc")', "os.system"),
         ('import subprocess; subprocess.run(["nohup", "rm", "-rf", "/etc"])', "subprocess"),
+        ('import subprocess; subprocess.run(["sudo", "-n", "rm", "-rf", "/etc"])', "subprocess"),
+        ('import subprocess; subprocess.run(["sudo", "-i", "rm", "-rf", "/etc"])', "subprocess"),
+        ('import subprocess; subprocess.run(["sudo", "-E", "rm", "-rf", "/etc"])', "subprocess"),
+        ('import subprocess; subprocess.run(["sudo", "-S", "rm", "-rf", "/etc"])', "subprocess"),
+        ('import subprocess; subprocess.run(["sudo", "-k", "rm", "-rf", "/etc"])', "subprocess"),
+        ('import subprocess; subprocess.run(["env", "-i", "rm", "-rf", "/etc"])', "subprocess"),
+        ('import subprocess; subprocess.run(["timeout", "10", "rm", "-rf", "/etc"])', "subprocess"),
+        (
+            'import subprocess; subprocess.run(["timeout", "-k", "5", "10", "rm", "-rf", "/etc"])',
+            "subprocess",
+        ),
     ],
 )
 def test_destructive_ast_evasions_detected(code: str, expected_keyword: str) -> None:

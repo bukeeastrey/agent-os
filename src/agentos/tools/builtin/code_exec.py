@@ -100,25 +100,44 @@ _PREFIX_COMMANDS: frozenset[str] = frozenset(
         "pwsh.exe",
     }
 )
-_PREFIX_TAKES_ARG: frozenset[str] = frozenset(
-    {
-        "-u",
-        "-g",
-        "-p",
-        "-h",
-        "-n",
-        "-s",
-        "-k",
-        "-a",
-        "-d",
-        "-e",
-        "-i",
-        "-l",
-        "--user",
-        "--group",
-        "--priority",
-    }
-)
+_PREFIX_FLAGS_WITH_ARG: dict[str, frozenset[str]] = {
+    "sudo": frozenset(
+        {
+            "-u",
+            "-g",
+            "-p",
+            "-h",
+            "-C",
+            "-D",
+            "-r",
+            "-t",
+            "-T",
+            "-U",
+            "--user",
+            "--group",
+            "--host",
+        }
+    ),
+    "doas": frozenset(
+        {
+            "-u",
+            "-g",
+            "-p",
+            "-h",
+            "-C",
+            "-D",
+            "-r",
+            "-t",
+            "-T",
+            "-U",
+            "--user",
+        }
+    ),
+    "env": frozenset({"-u", "-C", "-S", "--unset", "--chdir", "--split-string"}),
+    "nice": frozenset({"-n", "--adjustment"}),
+    "timeout": frozenset({"-k", "-s", "--kill-after", "--signal"}),
+    "xargs": frozenset({"-I", "-n", "-L", "-P", "-s", "-d", "-a", "-E"}),
+}
 _SHELL_DELETE_RE: re.Pattern[str] = re.compile(
     _COMMAND_PREFIX + r"(?:rm|rmdir|del|erase|rd|Remove-Item)\b", re.IGNORECASE
 )
@@ -393,22 +412,38 @@ class _DestructiveCodeVisitor(ast.NodeVisitor):
                 return False
             idx = 0
             while idx < len(evaluated):
-                token = evaluated[idx].lower().strip()
-                if token in _PREFIX_COMMANDS:
+                token = evaluated[idx].strip()
+                base_cmd = os.path.basename(token).lower()
+                if base_cmd in _PREFIX_COMMANDS:
                     idx += 1
+                    flags_with_arg = _PREFIX_FLAGS_WITH_ARG.get(base_cmd, frozenset())
+                    while idx < len(evaluated):
+                        arg = evaluated[idx].strip()
+                        if arg == "--":
+                            idx += 1
+                            break
+                        if arg in flags_with_arg:
+                            idx += 2 if idx + 1 < len(evaluated) else 1
+                            continue
+                        if arg.startswith("-") or arg.startswith("/"):
+                            idx += 1
+                            continue
+                        if base_cmd == "env" and "=" in arg and not arg.startswith("="):
+                            idx += 1
+                            continue
+                        break
+                    if base_cmd == "timeout" and idx < len(evaluated):
+                        idx += 1
                     continue
-                if token in _PREFIX_TAKES_ARG and idx + 1 < len(evaluated):
-                    idx += 2
-                    continue
-                if token.startswith("-") or token.startswith("/"):
-                    idx += 1
-                    continue
-                if "=" in token and not token.startswith("="):
-                    idx += 1
-                    continue
-                if token in _SHELL_DELETE_CMDS or _SHELL_DELETE_RE.search(evaluated[idx]):
+                break
+
+            if idx < len(evaluated) and evaluated[idx].strip() == "--":
+                idx += 1
+
+            if idx < len(evaluated):
+                target = evaluated[idx].lower().strip()
+                if target in _SHELL_DELETE_CMDS or _SHELL_DELETE_RE.search(evaluated[idx]):
                     return True
-                return False
             return False
         cmd_str = _eval_const_str(first_arg, aliases)
         return bool(cmd_str and _SHELL_DELETE_RE.search(cmd_str))
