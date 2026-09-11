@@ -1035,21 +1035,27 @@ class SessionStorage:
             if col not in {"receipt_id", "idempotency_key", "created_at"}
         )
         values = [_serialize(data[col]) for col in cols]
-        await self.conn.execute(
+        async with self.conn.execute(
             f"""
             INSERT INTO memory_durable_receipts ({", ".join(cols)})
             VALUES ({placeholders})
             ON CONFLICT(idempotency_key) DO UPDATE SET {updates}
+            RETURNING *
             """,
             values,
-        )
+        ) as cur:
+            row = await cur.fetchone()
         await self.conn.commit()
+        if row is not None:
+            return MemoryDurableReceipt(**_deserialize_row(dict(row)))
         rows = await self.list_memory_durable_receipts(
             session_key=receipt.session_key,
             idempotency_key=receipt.idempotency_key,
             limit=1,
         )
-        return rows[0]
+        if rows:
+            return rows[0]
+        return receipt
 
     async def list_memory_durable_receipts(
         self,

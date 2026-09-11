@@ -354,3 +354,69 @@ async def test_record_memory_checkpoint_writes_checkpoint_off_event_loop(
         await storage.close()
 
 
+async def test_upsert_memory_durable_receipt_atomic_returning(tmp_path):
+    storage = await SessionStorage.open(tmp_path / "sessions.db")
+    try:
+        receipt = MemoryDurableReceipt(
+            receipt_id="r-atomic",
+            session_key="agent:main:webchat:abc",
+            session_id="session-1",
+            turn_id="turn-1",
+            scope="checkpoint",
+            source_path="memory/turn-1.jsonl",
+            target_path=None,
+            content_hash="h1",
+            idempotency_key="atomic:checkpoint:1",
+            status="checkpoint_saved",
+            reason=None,
+            attempt_count=0,
+            next_retry_at_ms=None,
+        )
+        saved = await storage.upsert_memory_durable_receipt(receipt)
+        assert saved.receipt_id == "r-atomic"
+        assert saved.status == "checkpoint_saved"
+
+        # Update via upsert conflict
+        receipt.status = "checkpoint_failed"
+        receipt.reason = "network error"
+        updated = await storage.upsert_memory_durable_receipt(receipt)
+        assert updated.receipt_id == "r-atomic"
+        assert updated.status == "checkpoint_failed"
+        assert updated.reason == "network error"
+    finally:
+        await storage.close()
+
+
+async def test_upsert_memory_durable_receipt_safe_under_concurrent_deletion(tmp_path, monkeypatch):
+    storage = await SessionStorage.open(tmp_path / "sessions.db")
+    try:
+        receipt = MemoryDurableReceipt(
+            receipt_id="r-concurrent",
+            session_key="agent:main:webchat:abc",
+            session_id="session-1",
+            turn_id="turn-1",
+            scope="checkpoint",
+            source_path="memory/turn-1.jsonl",
+            target_path=None,
+            content_hash="h1",
+            idempotency_key="atomic:checkpoint:2",
+            status="checkpoint_saved",
+            reason=None,
+            attempt_count=0,
+            next_retry_at_ms=None,
+        )
+
+        # Mock list_memory_durable_receipts to return empty list as if row was deleted
+        async def mock_list(*args, **kwargs):
+            return []
+
+        monkeypatch.setattr(storage, "list_memory_durable_receipts", mock_list)
+
+        # Must succeed without raising IndexError
+        result = await storage.upsert_memory_durable_receipt(receipt)
+        assert result.receipt_id == "r-concurrent"
+    finally:
+        await storage.close()
+
+
+
