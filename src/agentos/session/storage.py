@@ -380,6 +380,8 @@ END
 """
 
 _SQLITE_VARIABLE_CHUNK_SIZE = 900
+_FTS_MAX_TOKENS = 20
+_FTS_MAX_TOKEN_LENGTH = 128
 
 
 def _now_ms() -> int:
@@ -1817,8 +1819,11 @@ class SessionStorage:
         tokens = cleaned.split()
         if not tokens:
             return '""'
-        # Wrap each token in double-quotes for literal matching
-        return " ".join(f'"{t}"' for t in tokens[:20])  # cap at 20 terms
+        # Wrap each token in double-quotes for literal matching, capped in count
+        # and per-token length to prevent parser denial of service.
+        return " ".join(
+            f'"{t[:_FTS_MAX_TOKEN_LENGTH]}"' for t in tokens[:_FTS_MAX_TOKENS]
+        )
 
     async def search_transcript(
         self,

@@ -69,7 +69,7 @@ def test_fts_operators_stripped() -> None:
 
 def test_punctuation_stripped() -> None:
     """Punctuation and special characters are stripped."""
-    result = SessionStorage.sanitize_fts_query("hello, world! how's \"it\" going?")
+    result = SessionStorage.sanitize_fts_query('hello, world! how\'s "it" going?')
     assert result == '"hello" "world" "how" "s" "it" "going"'
 
 
@@ -87,15 +87,42 @@ def test_whitespace_only() -> None:
 
 def test_token_limit_20() -> None:
     """Input with more than 20 tokens is capped to 20 tokens."""
-    result = SessionStorage.sanitize_fts_query('a b c d e f g h i j k l m n o p q r s t u v w x y')
+    result = SessionStorage.sanitize_fts_query("a b c d e f g h i j k l m n o p q r s t u v w x y")
     tokens = result.split()
     assert len(tokens) == 20
 
 
 def test_unicode_token_limit() -> None:
     """Unicode tokens count toward the 20-token limit correctly."""
-    tokens_list = [chr(0x4e00 + i) for i in range(25)]
+    tokens_list = [chr(0x4E00 + i) for i in range(25)]
     query = " ".join(tokens_list)
     result = SessionStorage.sanitize_fts_query(query)
     tokens = result.split()
     assert len(tokens) == 20
+
+
+def test_token_length_cap() -> None:
+    """Individual tokens longer than 128 characters are capped to 128 characters."""
+    giant_word = "a" * 50_000
+    result = SessionStorage.sanitize_fts_query(giant_word)
+    assert result == f'"{giant_word[:128]}"'
+    assert len(result) == 130  # 128 chars + 2 quotes
+
+
+def test_token_length_cap_unicode() -> None:
+    """Long unicode tokens are also capped to 128 characters."""
+    giant_unicode = "\u4e2d" * 500
+    result = SessionStorage.sanitize_fts_query(giant_unicode)
+    assert result == f'"{giant_unicode[:128]}"'
+    assert len(result) == 130
+
+
+async def test_search_transcript_with_giant_query() -> None:
+    """search_transcript safely executes when provided with an oversized token query."""
+    storage = SessionStorage(":memory:")
+    try:
+        await storage.connect()
+        results = await storage.search_transcript("word " + "x" * 50_000)
+        assert results == []
+    finally:
+        await storage.close()
