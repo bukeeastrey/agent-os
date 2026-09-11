@@ -421,7 +421,24 @@ def _deserialize_row(row: dict[str, Any]) -> dict[str, Any]:
         if k in json_fields and isinstance(v, str):
             try:
                 result[k] = json.loads(v)
-            except (json.JSONDecodeError, TypeError):
+            except (json.JSONDecodeError, TypeError) as exc:
+                row_ident = (
+                    row.get("session_key")
+                    or row.get("session_id")
+                    or row.get("message_id")
+                    or row.get("task_id")
+                    or row.get("receipt_id")
+                    or row.get("summary_id")
+                    or row.get("state_key")
+                    or row.get("id")
+                    or "<unknown>"
+                )
+                log.warning(
+                    "Failed to deserialize JSON field '%s' for row '%s': %s",
+                    k,
+                    row_ident,
+                    exc,
+                )
                 result[k] = None
         elif k in bool_fields:
             result[k] = bool(v)
