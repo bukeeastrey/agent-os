@@ -1495,6 +1495,8 @@ class SessionStorage:
         if not entries:
             return
         archived_at = _now_ms()
+        rows_values: list[list[Any]] = []
+        cols: list[str] | None = None
         for entry in entries:
             entry_data = entry.model_dump(exclude={"id"})
             entry_data["session_id"] = node.session_id
@@ -1508,14 +1510,17 @@ class SessionStorage:
                 **entry_data,
                 "archived_at": archived_at,
             }
-            cols = list(archive_data.keys())
+            if cols is None:
+                cols = list(archive_data.keys())
+            rows_values.append([_serialize(archive_data[c]) for c in cols])
+
+        if cols and rows_values:
             placeholders = ", ".join("?" for _ in cols)
-            values = [_serialize(archive_data[c]) for c in cols]
-            await self.conn.execute(
-                "INSERT INTO compacted_transcript_entries "
-                f"({', '.join(cols)}) VALUES ({placeholders})",
-                values,
+            sql = (
+                f"INSERT INTO compacted_transcript_entries ({', '.join(cols)}) "
+                f"VALUES ({placeholders})"
             )
+            await self.conn.executemany(sql, rows_values)
 
     @_serialized_write
     async def rewrite_compacted_session(
