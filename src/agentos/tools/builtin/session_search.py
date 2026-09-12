@@ -55,6 +55,10 @@ def create_session_search_tool(
                     "(e.g. 'agent:main:webchat:abc123')."
                 ),
             },
+            "session_id": {
+                "type": "string",
+                "description": ("Optional: legacy alias for session key."),
+            },
             "scope": {
                 "type": "string",
                 "enum": ["all", "project"],
@@ -75,6 +79,8 @@ def create_session_search_tool(
     async def session_search(
         query: str,
         session: str | None = None,
+        session_id: str | None = None,
+        session_key: str | None = None,
         scope: str = "all",
         limit: int = 20,
     ) -> str:
@@ -89,9 +95,9 @@ def create_session_search_tool(
         project_id: str | None = None
         if scope == "project":
             ctx = current_tool_context.get()
-            session_key = getattr(ctx, "session_key", None) if ctx else None
-            session = await active_storage.get_session(session_key) if session_key else None
-            project_id = getattr(session, "project_id", None) if session else None
+            ctx_key = getattr(ctx, "session_key", None) if ctx else None
+            caller_session = await active_storage.get_session(ctx_key) if ctx_key else None
+            project_id = getattr(caller_session, "project_id", None) if caller_session else None
             if not project_id:
                 return json.dumps(
                     {
@@ -101,10 +107,11 @@ def create_session_search_tool(
                     }
                 )
 
+        target_session = session or session_key or session_id
         try:
             results = await active_storage.search_transcript(
                 query=query,
-                session_key=session,
+                session_key=target_session,
                 limit=limit,
                 project_id=project_id,
             )

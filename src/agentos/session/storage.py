@@ -1819,8 +1819,8 @@ class SessionStorage:
             clauses.append("t.session_key = ?")
             params.append(session_key)
         elif session_id:
-            clauses.append("t.session_id = ?")
-            params.append(session_id)
+            clauses.append("(t.session_id = ? OR t.session_key = ?)")
+            params.extend([session_id, session_id])
         if project_id:
             joins = "JOIN sessions s ON s.session_id = t.session_id "
             clauses.append("s.project_id = ?")
