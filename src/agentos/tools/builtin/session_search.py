@@ -48,9 +48,12 @@ def create_session_search_tool(
                 "type": "string",
                 "description": "Search query - natural language terms to find in transcripts.",
             },
-            "session_id": {
+            "session": {
                 "type": "string",
-                "description": "Optional: restrict search to a specific session ID.",
+                "description": (
+                    "Optional: restrict search to a specific session key "
+                    "(e.g. 'agent:main:webchat:abc123')."
+                ),
             },
             "scope": {
                 "type": "string",
@@ -71,7 +74,7 @@ def create_session_search_tool(
     )
     async def session_search(
         query: str,
-        session_id: str | None = None,
+        session: str | None = None,
         scope: str = "all",
         limit: int = 20,
     ) -> str:
@@ -101,7 +104,7 @@ def create_session_search_tool(
         try:
             results = await active_storage.search_transcript(
                 query=query,
-                session_id=session_id,
+                session_key=session,
                 limit=limit,
                 project_id=project_id,
             )
