@@ -104,3 +104,61 @@ async def test_recreated_session_key_does_not_inherit_deleted_tasks() -> None:
         assert grouped[SESSION_KEY] == []
     finally:
         await storage.close()
+
+
+async def _count(storage: SessionStorage, table: str, session_key: str) -> int:
+    async with storage.conn.execute(
+        f"SELECT COUNT(*) FROM {table} WHERE session_key = ?", (session_key,)
+    ) as cur:
+        row = await cur.fetchone()
+    return int(row[0]) if row else 0
+
+
+async def test_delete_session_removes_rows_from_an_earlier_session_id() -> None:
+    """Child rows are session-key scoped, so a rotated session_id must not orphan them.
+
+    ``upsert_session`` is ``ON CONFLICT(session_key) DO UPDATE SET
+    session_id=excluded.session_id``, so the sessions row can carry a new
+    ``session_id`` while the key stays fixed. Deleting child rows by the
+    *current* ``session_id`` alone leaves everything written under the previous
+    one behind -- and because session keys are deterministic, the next session
+    that reuses the key inherits those rows.
+    """
+    storage = SessionStorage(":memory:")
+    await storage.connect()
+    try:
+        await _seed(storage, session_id="session-1", task_id="task-1")
+        # Same key, rotated id — then more history under the new id.
+        await _seed(storage, session_id="session-2", task_id="task-2")
+
+        assert await _count(storage, "transcript_entries", SESSION_KEY) == 2
+
+        await storage.delete_session(SESSION_KEY)
+
+        assert await _count(storage, "transcript_entries", SESSION_KEY) == 0
+        assert await storage.count_sessions() == 0
+    finally:
+        await storage.close()
+
+
+async def test_delete_session_clears_every_session_scoped_table_after_rotation() -> None:
+    """The same guarantee for each table delete_session touches."""
+    storage = SessionStorage(":memory:")
+    await storage.connect()
+    try:
+        await _seed(storage, session_id="session-1", task_id="task-1")
+        await _seed(storage, session_id="session-2", task_id="task-2")
+
+        await storage.delete_session(SESSION_KEY)
+
+        for table in (
+            "transcript_entries",
+            "compacted_transcript_entries",
+            "session_summaries",
+            "session_context_states",
+            "agent_tasks",
+            "memory_durable_receipts",
+        ):
+            assert await _count(storage, table, SESSION_KEY) == 0, f"{table} left orphans"
+    finally:
+        await storage.close()
