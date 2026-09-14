@@ -234,6 +234,43 @@ def _runs_quoted_argument_as_command(prefix: str) -> bool:
     return False
 
 
+def _unwrap_shell_wrapper(command: str) -> str:
+    """Strip an enclosing shell wrapper (e.g. ``bash -c '...'``) if present."""
+    cmd = command.strip()
+    try:
+        tokens = shlex.split(cmd)
+    except ValueError:
+        return command
+    if not tokens:
+        return command
+    idx = 0
+    while idx < len(tokens):
+        base = os.path.basename(tokens[idx]).lower()
+        if base in {"sudo", "doas", "nohup", "time", "nice", "timeout"}:
+            idx += 1
+            continue
+        if base == "env":
+            idx += 1
+            while idx < len(tokens) and "=" in tokens[idx] and not tokens[idx].startswith("="):
+                idx += 1
+            continue
+        if base in _SHELL_NAMES:
+            idx += 1
+            while idx < len(tokens):
+                flag = tokens[idx]
+                if flag == "-c" or (
+                    flag.startswith("-") and not flag.startswith("--") and "c" in flag
+                ):
+                    if idx + 1 == len(tokens) - 1:
+                        return tokens[idx + 1]
+                elif flag.startswith("-"):
+                    idx += 1
+                    continue
+                break
+        break
+    return command
+
+
 def _command_spans(command: str) -> list[tuple[int, int]]:
     """Ranges of *command* a shell would read as command text.
 
@@ -246,6 +283,15 @@ def _command_spans(command: str) -> list[tuple[int, int]]:
     quote: str | None = None
     quote_open = 0
     for index, char in enumerate(command):
+        if quote is not None and char == quote:
+            num_bs = 0
+            k = index - 1
+            while k >= 0 and command[k] == "\\":
+                num_bs += 1
+                k -= 1
+            if num_bs % 2 == 1:
+                continue
+
         if quote is None:
             if char in "'\"":
                 spans.append((start, index))
@@ -265,6 +311,21 @@ def _command_spans(command: str) -> list[tuple[int, int]]:
     return spans
 
 
+def _split_rm_tail(tail: str, *, posix: bool = True) -> list[str]:
+    """Tokenize an ``rm`` argument tail, tolerating an unbalanced quote."""
+    try:
+        return shlex.split(tail, posix=posix)
+    except ValueError:
+        pass
+    trimmed = tail.rstrip("\"'")
+    if trimmed != tail:
+        try:
+            return shlex.split(trimmed, posix=posix)
+        except ValueError:
+            pass
+    return [stripped for token in tail.split() if (stripped := token.strip("\"'"))]
+
+
 def _extract_rm_targets(command: str) -> list[tuple[str, frozenset[str]]]:
     """Pull every ``rm`` argument out, tagged with that invocation's flags.
 
@@ -279,15 +340,13 @@ def _extract_rm_targets(command: str) -> list[tuple[str, frozenset[str]]]:
     check ``grep -rn "rm" /etc/passwd`` extracted ``/etc/passwd`` and was
     hard-blocked as a delete, and the operator could not approve past it.
     """
+    # Strip any enclosing shell wrapper first (e.g. bash -c "..." or sh -c '...').
+    command = _unwrap_shell_wrapper(command)
+
     # Match each ``rm`` invocation, stopping at shell separators.
     # ``[^;\n&|]*`` captures everything from ``rm`` up to the next separator
     # or end-of-expression, so each ``rm`` is tokenized independently.
     pattern = re.compile(r"\brm\b([^;\n&|]*)")
-    # Position, not quoting, is what tells a command from a word here. Requiring
-    # ``rm`` to start the string or follow a separator would look tighter but
-    # drops ``sudo rm -rf /etc``, ``env FOO=1 rm …``, ``time rm …`` and
-    # ``xargs rm`` — a command prefix is ordinary, so that spelling trades a
-    # false positive for a bypass.
     executable = _command_spans(command)
     matches = [
         match
@@ -305,16 +364,9 @@ def _extract_rm_targets(command: str) -> list[tuple[str, frozenset[str]]]:
         if not tail:
             continue
 
-        token_sets: list[list[str]] = []
-        try:
-            token_sets.append(shlex.split(tail))
-        except ValueError:
-            token_sets.append(tail.split())
+        token_sets: list[list[str]] = [_split_rm_tail(tail)]
         if "\\" in tail and (os.name == "nt" or re.search(r"(?:^|\s)\\[^\s]", tail)):
-            try:
-                token_sets.append(shlex.split(tail, posix=False))
-            except ValueError:
-                token_sets.append(tail.split())
+            token_sets.append(_split_rm_tail(tail, posix=False))
 
         for tokens in token_sets:
             capabilities = _rm_invocation_capabilities(tokens)
