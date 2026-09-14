@@ -170,8 +170,10 @@ class StreamThrottle:
 
     Accumulates incoming chunks; ``maybe_flush`` sends the latest snapshot
     via ``post`` (first call) or ``edit`` (subsequent calls). The
-    ``asyncio.Lock`` ensures a second flush cannot start while a first is
-    awaiting the network. If a send raises, the accumulated text remains
+    ``asyncio.Lock`` serializes sends, and the throttle window is re-checked
+    *after* acquiring it: a caller that queued behind an in-flight flush
+    finds the snapshot already sent and returns ``None`` rather than issuing
+    a second round trip. If a send raises, the accumulated text remains
     intact so the next ``maybe_flush`` retries with the same snapshot.
     """
 
@@ -183,6 +185,10 @@ class StreamThrottle:
 
     def add(self, text: str) -> None:
         self._accumulated += text
+
+    def _throttled(self) -> bool:
+        """True when an already-opened stream is inside its throttle window."""
+        return self._opened and time.monotonic() - self._last_flush < self.interval_s
 
     @property
     def text(self) -> str:
@@ -201,10 +207,16 @@ class StreamThrottle:
         """Send the accumulated snapshot if the throttle window has elapsed."""
         if not self._accumulated:
             return None
-        now = time.monotonic()
-        if self._opened and now - self._last_flush < self.interval_s:
+        if self._throttled():
             return None
         async with self._lock:
+            # Re-check under the lock. The pre-check above is only a fast
+            # path: every caller evaluates it before contending, so on its
+            # own it lets N concurrent callers all pass and all send. The
+            # authoritative decision has to be made while holding the lock,
+            # after any in-flight flush has updated _last_flush.
+            if self._throttled() or not self._accumulated:
+                return None
             text = self._accumulated
             if not self._opened:
                 result = await post(text)
