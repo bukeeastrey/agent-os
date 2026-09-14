@@ -85,9 +85,17 @@ def _resolve_session_key(job: CronJob) -> str:
         case SessionTarget.SESSION:
             return job.session_key or f"cron:{job.id}"
         case SessionTarget.MAIN:
-            raise NotImplementedError(
-                "MAIN target requires heartbeat mechanism, not yet implemented"
-            )
+            # The heartbeat mechanism this used to wait on now exists, and the
+            # rest of this module already resolves MAIN the same way:
+            # _build_cron_tool_context falls back to build_main_key(agent_id),
+            # and make_system_event_handler uses
+            # `job.session_key or build_main_key(agent_id)`. Raising here left
+            # a legacy row able to crash the handler it dispatches to --
+            # normalize_contract rejects agent_turn/reminder/script with
+            # sessionTarget="main" on create, but the persistence loaders call
+            # it with strict=False, so a row written before that validation
+            # existed still loads with handler_key="agent_run" and target MAIN.
+            return job.session_key or build_main_key(payload_agent_id(job.payload))
         case SessionTarget.CURRENT:
             if job.session_key:
                 return job.session_key
@@ -680,7 +688,7 @@ def make_system_event_handler(
                     "kind": "cron",
                     "source_tool": f"cron:{job.id}",
                 },
-        )
+            )
 
         await delivery_chain.notify_start(job, text)
         heartbeat_loop = heartbeat_loop_ref() if heartbeat_loop_ref else None
@@ -732,6 +740,7 @@ def make_system_event_handler(
             heartbeat_kwargs["delivery_override"] = delivery_override
         run_once_now = getattr(heartbeat_loop, "run_once_now", None)
         if callable(run_once_now):
+
             async def _run_once():
                 run_once_kwargs: dict[str, Any] = {
                     "reason": reason,
@@ -746,6 +755,7 @@ def make_system_event_handler(
                 return await run_once_now(**run_once_kwargs)
 
         else:
+
             async def _run_once():
                 return await heartbeat_service.run_once(**heartbeat_kwargs)
 
