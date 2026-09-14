@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import secrets
 from pathlib import Path
 from typing import Any
@@ -24,13 +25,17 @@ def transcript_material_dir(media_root: Path, session_id: str) -> Path:
     return Path(media_root) / "transcripts" / session_id
 
 
+#: A SHA-256 digest is exactly 64 hex characters and nothing else. Checked
+#: with an explicit pattern rather than ``int(value, 16)``: int() accepts
+#: digit-group underscores, surrounding whitespace and a leading sign, so
+#: values like ``"a"*32 + "_" + "a"*31`` or ``" " + "a"*63`` passed a check
+#: whose name promises hex — and then became filenames under the media root.
+_SHA256_RE = re.compile(r"[0-9a-fA-F]{64}")
+
+
 def _validate_sha256(value: Any) -> str:
-    if not isinstance(value, str) or len(value) != 64:
+    if not isinstance(value, str) or not _SHA256_RE.fullmatch(value):
         raise ValueError("attachment ref sha256 is invalid")
-    try:
-        int(value, 16)
-    except ValueError as exc:
-        raise ValueError("attachment ref sha256 is invalid") from exc
     return value.lower()
 
 
