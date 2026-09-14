@@ -1565,6 +1565,24 @@ async def _handle_sessions_patch(params: dict | None, ctx: RpcContext) -> dict:
             upsert = getattr(storage, "upsert_session", None)
             if upsert is not None:
                 await upsert(session)
+        # Tell subscribers the row changed. Only the project-move branch below
+        # used to broadcast, so renaming a session through sessions.patch, or
+        # changing its model, thinking level or metadata, persisted silently:
+        # every connected client kept showing the old value until something
+        # else happened to refresh it. The reason is distinct from
+        # "project_moved" so a combined patch still reports both, and it is
+        # deliberately not one of the terminal reasons the chat view checks.
+        await _emit_to_subscribers(
+            ctx,
+            key,
+            "sessions.changed",
+            build_sessions_changed_payload(
+                key,
+                "session_patched",
+                updated=list(updated_fields),
+                display_name=update_values.get("display_name"),
+            ),
+        )
 
     # Project moves route through the manager's validation choke point (the
     # project must exist; membership is cross-agent). An explicit null
