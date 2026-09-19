@@ -526,3 +526,18 @@ def test_unwrapped_commands_are_unchanged(command: str) -> None:
 
 def test_benign_command_is_still_not_an_intent() -> None:
     assert _extract_intents('echo "rm is a word"') == []
+
+
+def test_backslash_inside_single_quotes_does_not_hide_the_next_command() -> None:
+    """Review regression on #2178: a backslash is literal inside single quotes.
+
+    In POSIX shells ``'abc\\'`` is a closed string, so ``rm -rf /etc`` after the
+    separator runs. Treating the backslash as escaping the closing quote kept
+    the quote open to the end of the line, the ``rm`` read as quoted data,
+    and the sensitive-path hard block never fired.
+    """
+    command = "echo 'abc\\' ; rm -rf /etc"
+    assert command.count("\\") == 1, "the single backslash is the point of this case"
+
+    assert _names_etc([target for _kind, target in _extract_intents(command)])
+    assert sensitive_target_in_command(command) is not None
