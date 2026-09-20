@@ -657,17 +657,22 @@ async def _handle_usage_cost(params: dict | None, ctx: RpcContext) -> dict[str, 
     if ctx.usage_tracker is not None:
         rows = ctx.usage_tracker.query_usage(**query_params)
 
-    if not rows and ctx.session_manager is not None:
-        if (
-            query_params.get("tool_name")
-            or query_params.get("skill")
-            or query_params.get("start_date")
-            or query_params.get("end_date")
-        ):
+    # The session-level fallback reports whole-session totals, which carry no tool name, no
+    # skill and no per-record timestamp, so it cannot answer a query filtered by those.
+    ledger_only_filter = any(
+        query_params.get(key) for key in ("tool_name", "skill", "start_date", "end_date")
+    )
+    if not rows and ctx.session_manager is not None and ledger_only_filter:
+        if ctx.usage_tracker is None:
+            # No ledger at all: the question cannot be answered, and answering it from
+            # session totals would present unfiltered rows as if they matched.
             raise ValueError(
                 "The cost ledger returned no records, and the fallback session-level summary "
                 "cannot filter by tool name, skill, or date range."
             )
+        # The ledger did answer -- with nothing. A filter that matches no record is an
+        # empty ledger, not a broken one, so it must not crash the call (#3036).
+    elif not rows and ctx.session_manager is not None:
         try:
             sessions = await ctx.session_manager.list_sessions()
             for s in sessions:
