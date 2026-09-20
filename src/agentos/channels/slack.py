@@ -602,9 +602,12 @@ class SlackChannel:
             raise RuntimeError("Slack stream has no target channel")
         throttle = StreamThrottle(interval_s=update_interval_ms / 1000.0)
         message_ts: str | None = None
+        # Characters already frozen into earlier messages of this reply. The
+        # throttle hands every flush the whole accumulated text, so each send
+        # works on the tail past this mark.
+        segment_start = 0
 
-        async def _post(text: str) -> None:
-            nonlocal message_ts
+        async def _open_message(text: str) -> str:
             payload: dict[str, Any] = {
                 "channel": target,
                 "text": text,
@@ -616,17 +619,40 @@ class SlackChannel:
             data = resp.json()
             if not data.get("ok"):
                 raise RuntimeError(f"Slack API error: {data.get('error')}")
-            message_ts = data["ts"]
+            return str(data["ts"])
+
+        async def _post_segments(remaining: str) -> None:
+            """Post *remaining* as one or more messages, splitting at the cap.
+
+            ``segment_start`` advances only for a segment that is full and
+            closed, so a failure part way through never resends visible text.
+            """
+            nonlocal message_ts, segment_start
+            while True:
+                head, tail = split_text_for_limit(remaining, _SLACK_MESSAGE_TEXT_LIMIT)
+                message_ts = await _open_message(head)
+                if not tail:
+                    return
+                segment_start += len(head)
+                remaining = tail
+
+        async def _post(text: str) -> None:
+            await _post_segments(text[segment_start:])
             log.debug("slack.stream_start", ts=message_ts)
 
         async def _edit(text: str) -> None:
+            nonlocal segment_start
+            current = message_ts
+            if current is None:  # pragma: no cover - the throttle posts before it edits
+                raise RuntimeError("Slack stream edit before the message was opened")
+            head, tail = split_text_for_limit(text[segment_start:], _SLACK_MESSAGE_TEXT_LIMIT)
             resp = await retry_request(
                 client.post,
                 "/chat.update",
                 json={
                     "channel": target,
-                    "ts": message_ts,
-                    "text": text,
+                    "ts": current,
+                    "text": head,
                 },
             )
             resp.raise_for_status()
@@ -635,9 +661,13 @@ class SlackChannel:
                 log.error(
                     "slack.stream_edit_failed",
                     error=data.get("error"),
-                    message_id=message_ts,
+                    message_id=current,
                 )
                 raise RuntimeError(f"Slack API error: {data.get('error')}")
+            if tail:
+                # This message is full: freeze it and roll over into a new one.
+                segment_start += len(head)
+                await _post_segments(tail)
 
         async for chunk in chunks:
             throttle.add(chunk)
