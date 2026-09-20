@@ -4642,10 +4642,15 @@ class Agent:
             )
         ).hexdigest()
         failure_signature = (tc.tool_name, args_hash)
-        block_threshold = max(
+        configured_threshold = max(
             0,
             int(getattr(self.config, "tool_failure_loop_block_threshold", 0) or 0),
         )
+        # The gate blocks the Nth attempt of an identical call, so N-1 of them have
+        # already failed by then. A threshold of 1 would block the first attempt, before
+        # the call has run even once and so before anything can have failed (#3027);
+        # read it as the tightest real setting instead: one failure, then block.
+        block_threshold = max(2, configured_threshold) if configured_threshold else 0
         if (
             block_threshold > 0
             and self._tool_failure_loop_counts.get(failure_signature, 0) >= block_threshold - 1
