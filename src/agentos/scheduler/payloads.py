@@ -102,9 +102,10 @@ AGENT_TURN_KIND = "agent_turn"
 REMINDER_KIND = "reminder"
 SYSTEM_EVENT_KIND = "system_event"
 SCRIPT_KIND = "script"
-_VALID_PAYLOAD_KINDS = frozenset(
+VALID_PAYLOAD_KINDS = frozenset(
     {AGENT_TURN_KIND, REMINDER_KIND, SYSTEM_EVENT_KIND, SCRIPT_KIND}
 )
+_VALID_PAYLOAD_KINDS = VALID_PAYLOAD_KINDS
 _KNOWN_HANDLER_KEYS = frozenset(
     {"agent_run", "static_message", "system_event", "script_run"}
 )

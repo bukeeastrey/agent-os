@@ -19,6 +19,7 @@ from agentos.scheduler.payloads import (
     REMINDER_KIND,
     SCRIPT_KIND,
     SYSTEM_EVENT_KIND,
+    VALID_PAYLOAD_KINDS,
     make_agent_turn_payload,
     make_reminder_payload,
     make_script_payload,
@@ -684,6 +685,14 @@ def _build_payload(
     kind = params.get("payloadKind")
     if not isinstance(kind, str) or not kind:
         kind = SYSTEM_EVENT_KIND if session_target == SessionTarget.MAIN else REMINDER_KIND
+    if kind not in VALID_PAYLOAD_KINDS:
+        # Anything unrecognised used to fall through to the agent_turn branch below, so a
+        # typo created an LLM turn job -- the most expensive kind -- and reported success
+        # (#3029). The caller asked for something this server does not have.
+        raise ValueError(
+            f"Unknown payloadKind {kind!r}; expected one of "
+            f"{', '.join(sorted(VALID_PAYLOAD_KINDS))}"
+        )
     agent_id = params.get("agentId", "main")
 
     script_raw = params.get("script")
