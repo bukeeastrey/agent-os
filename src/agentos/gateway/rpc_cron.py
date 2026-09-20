@@ -1099,7 +1099,13 @@ async def _handle_cron_update(params: dict | None, ctx: RpcContext) -> dict[str,
         # patching it must not crash reading the fields to preserve.
         current_delivery = current_job.delivery or DeliveryConfig()
         current_ws_topic = current_delivery.ws_topic
-        if isinstance(delivery_raw, dict) and delivery_raw.get("mode") == "none":
+        if delivery_raw is None:
+            # An explicit null is a clear, not an omission: "delivery" not in params
+            # already means unchanged, so the only thing null can ask for is removal
+            # (#3030). Every branch below needs a dict, so this used to no-op and
+            # report success while the old route stayed live.
+            patch["delivery"] = DeliveryConfig()
+        elif isinstance(delivery_raw, dict) and delivery_raw.get("mode") == "none":
             patch["delivery"] = DeliveryConfig()
         elif _is_webhook_delivery(delivery_raw):
             new_delivery = _build_webhook_delivery(delivery_raw)
